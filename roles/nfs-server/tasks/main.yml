@@ -1,0 +1,82 @@
+# roles/nfs-server/tasks/main.yml
+---
+- name: Install NFS server packages
+  dnf:
+    name:
+      - nfs-utils
+      - rsync
+    state: present
+    update_cache: yes
+
+- name: Create NFS export directory
+  file:
+    path: "{{ nfs_export_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create log subdirectories
+  file:
+    path: "{{ nfs_export_path }}/{{ item }}"
+    state: directory
+    owner: "{{ nfs_loki_uid }}"
+    group: "{{ nfs_loki_gid }}"
+    mode: '0775'
+  loop: "{{ nfs_log_subdirs }}"
+
+- name: Check nfs_export_all_rw SELinux boolean
+  command: getsebool nfs_export_all_rw
+  register: nfs_sebool_export_rw_check
+  changed_when: false
+  when: ansible_selinux.status == 'enabled'
+
+- name: Allow NFS read-write exports through SELinux
+  command: setsebool -P nfs_export_all_rw on
+  when:
+    - ansible_selinux.status == 'enabled'
+    - nfs_sebool_export_rw_check.stdout is defined
+    - "'nfs_export_all_rw --> on' not in nfs_sebool_export_rw_check.stdout"
+
+- name: Set SELinux context on export path
+  command: restorecon -Rv {{ nfs_export_path }}
+  changed_when: false
+  failed_when: false
+  when: ansible_selinux.status == 'enabled'
+
+- name: Configure NFS exports
+  template:
+    src: exports.j2
+    dest: /etc/exports
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload NFS exports
+    - Restart nfs-server
+
+- name: Enable and start NFS server
+  service:
+    name: nfs-server
+    state: started
+    enabled: yes
+
+- name: Enable and start rpcbind (required for NFSv3 clients)
+  service:
+    name: rpcbind
+    state: started
+    enabled: yes
+
+- name: Apply export changes
+  meta: flush_handlers
+
+- name: Verify NFS export is registered
+  command: exportfs -v
+  register: nfs_exportfs
+  changed_when: false
+
+- name: Confirm export path is listed
+  assert:
+    that:
+      - nfs_export_path in nfs_exportfs.stdout
+    fail_msg: "NFS export {{ nfs_export_path }} not found in exportfs output"

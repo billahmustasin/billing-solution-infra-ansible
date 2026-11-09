@@ -1,0 +1,20 @@
+---
+- name: Install Redis
+  hosts: redis
+  become: yes
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Ensure Redis is installed
+      ansible.builtin.apt:
+        name: redis-server
+        state: present
+
+    - name: Ensure Redis is started and enabled
+      ansible.builtin.systemd:
+        name: redis-server
+        state: started
+        enabled: yes

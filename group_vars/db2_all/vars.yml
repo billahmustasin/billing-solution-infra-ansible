@@ -1,0 +1,43 @@
+# group_vars/db2_all/vars.yml — PostgreSQL HA Cluster 2 (non-secret)
+# db-a2a (172.17.106.4) + db-a2b (172.17.106.5)
+
+haproxy_backend_group: db2_all
+
+pg_version: 16
+pg_data_dir: /var/lib/pgsql/16/data
+pg_config_dir: /etc/postgresql/16/main
+
+patroni_cluster_name: myrace-pg-cluster-2
+
+# Shared 3-node etcd cluster (bootstrapped with Cluster 1)
+etcd_endpoints: "http://172.17.106.2:2379,http://172.17.106.3:2379,http://172.17.106.6:2379"
+
+app_db_user: production_db_user
+ops_db_user: race_ops_user
+ops_db_pool_size: 5
+metrics_exporter_user: metrics_exporter
+app_db_service_roles:
+  - race_customer_srv_user
+  - race_finance_srv_user
+  - race_notification_srv_user
+  - race_scheduler_srv_user
+  - race_loyalty_campaign_srv_user
+  - race_superapp_user
+  - race_customer_chat_user
+
+pgbackrest_repo_path: /var/lib/pgbackrest
+
+# Keepalived VIP — free IP in 172.17.106.0/24 (same subnet as db-a2a/db-a2b)
+haproxy_vip: "172.17.106.201"
+haproxy_vip_prefix: "24"
+haproxy_vrrp_id: 52
+haproxy_master_node: "db-a2a"
+
+haproxy_primary_port: 5000
+haproxy_replica_port: 5001
+haproxy_stats_port: 7000
+# Apps use VIP :5000. HAProxy forwards to Postgres on the Patroni leader, not PgBouncer.
+postgres_port: 5432
+patroni_api_port: 8008
+
+haproxy_stats_user: "admin"

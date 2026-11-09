@@ -1,0 +1,115 @@
+-- Cluster 2 leader (db-a2a). Additive — does not drop production_db_user.
+-- One LOGIN per service so PgBouncer gets a separate session pool per user.
+
+DO $$
+DECLARE
+  pw text := '{{ app_db_password | replace("'", "''") }}';
+  r text;
+BEGIN
+  FOREACH r IN ARRAY ARRAY[
+    'race_customer_srv_user',
+    'race_finance_srv_user',
+    'race_notification_srv_user',
+    'race_scheduler_srv_user',
+    'race_loyalty_campaign_srv_user',
+    'race_superapp_user',
+    'race_customer_chat_user'
+  ]
+  LOOP
+    BEGIN
+      EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', r, pw);
+    EXCEPTION
+      WHEN duplicate_object THEN
+        EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', r, pw);
+    END;
+  END LOOP;
+END
+$$;
+
+GRANT CONNECT, TEMPORARY ON DATABASE race_core_service TO
+  race_customer_srv_user, race_finance_srv_user, race_notification_srv_user,
+  race_scheduler_srv_user, race_loyalty_campaign_srv_user;
+GRANT CONNECT, TEMPORARY ON DATABASE race_superapp TO race_superapp_user;
+GRANT CONNECT, TEMPORARY ON DATABASE race_customer_chat TO race_customer_chat_user;
+
+\c race_core_service
+
+GRANT USAGE ON SCHEMA public TO
+  race_customer_srv_user, race_finance_srv_user, race_notification_srv_user,
+  race_scheduler_srv_user, race_loyalty_campaign_srv_user;
+
+GRANT USAGE, CREATE ON SCHEMA race_customer_srv TO race_customer_srv_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_customer_srv TO race_customer_srv_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_customer_srv TO race_customer_srv_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_customer_srv TO race_customer_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_customer_srv GRANT ALL ON TABLES TO race_customer_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_customer_srv GRANT ALL ON SEQUENCES TO race_customer_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA race_customer_srv GRANT ALL ON TABLES TO race_customer_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA race_customer_srv GRANT ALL ON SEQUENCES TO race_customer_srv_user;
+ALTER ROLE race_customer_srv_user SET search_path TO race_customer_srv, public;
+
+GRANT USAGE, CREATE ON SCHEMA race_finance_srv TO race_finance_srv_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_finance_srv TO race_finance_srv_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_finance_srv TO race_finance_srv_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_finance_srv TO race_finance_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_finance_srv GRANT ALL ON TABLES TO race_finance_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_finance_srv GRANT ALL ON SEQUENCES TO race_finance_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA race_finance_srv GRANT ALL ON TABLES TO race_finance_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA race_finance_srv GRANT ALL ON SEQUENCES TO race_finance_srv_user;
+ALTER ROLE race_finance_srv_user SET search_path TO race_finance_srv, public;
+
+GRANT USAGE, CREATE ON SCHEMA race_notification_srv TO race_notification_srv_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_notification_srv TO race_notification_srv_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_notification_srv TO race_notification_srv_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_notification_srv TO race_notification_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_notification_srv GRANT ALL ON TABLES TO race_notification_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_notification_srv GRANT ALL ON SEQUENCES TO race_notification_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA race_notification_srv GRANT ALL ON TABLES TO race_notification_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA race_notification_srv GRANT ALL ON SEQUENCES TO race_notification_srv_user;
+ALTER ROLE race_notification_srv_user SET search_path TO race_notification_srv, public;
+
+GRANT USAGE, CREATE ON SCHEMA race_scheduler_srv TO race_scheduler_srv_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_scheduler_srv TO race_scheduler_srv_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_scheduler_srv TO race_scheduler_srv_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_scheduler_srv TO race_scheduler_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_scheduler_srv GRANT ALL ON TABLES TO race_scheduler_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_scheduler_srv GRANT ALL ON SEQUENCES TO race_scheduler_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA race_scheduler_srv GRANT ALL ON TABLES TO race_scheduler_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA race_scheduler_srv GRANT ALL ON SEQUENCES TO race_scheduler_srv_user;
+ALTER ROLE race_scheduler_srv_user SET search_path TO race_scheduler_srv, public;
+
+GRANT USAGE, CREATE ON SCHEMA race_loyalty_campaign_srv TO race_loyalty_campaign_srv_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_loyalty_campaign_srv TO race_loyalty_campaign_srv_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_loyalty_campaign_srv TO race_loyalty_campaign_srv_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_loyalty_campaign_srv TO race_loyalty_campaign_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_loyalty_campaign_srv GRANT ALL ON TABLES TO race_loyalty_campaign_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_loyalty_campaign_srv GRANT ALL ON SEQUENCES TO race_loyalty_campaign_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA race_loyalty_campaign_srv GRANT ALL ON TABLES TO race_loyalty_campaign_srv_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA race_loyalty_campaign_srv GRANT ALL ON SEQUENCES TO race_loyalty_campaign_srv_user;
+ALTER ROLE race_loyalty_campaign_srv_user SET search_path TO race_loyalty_campaign_srv, public;
+
+\c race_superapp
+GRANT USAGE, CREATE ON SCHEMA public TO race_superapp_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO race_superapp_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO race_superapp_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO race_superapp_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO race_superapp_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO race_superapp_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA public GRANT ALL ON TABLES TO race_superapp_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA public GRANT ALL ON SEQUENCES TO race_superapp_user;
+ALTER ROLE race_superapp_user SET search_path TO public;
+
+\c race_customer_chat
+GRANT USAGE, CREATE ON SCHEMA public TO race_customer_chat_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO race_customer_chat_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO race_customer_chat_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO race_customer_chat_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO race_customer_chat_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO race_customer_chat_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA public GRANT ALL ON TABLES TO race_customer_chat_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE production_db_user IN SCHEMA public GRANT ALL ON SEQUENCES TO race_customer_chat_user;
+ALTER ROLE race_customer_chat_user SET search_path TO public;
+
+SELECT rolname FROM pg_roles
+WHERE rolname LIKE 'race_%_user' OR rolname = 'production_db_user'
+ORDER BY 1;

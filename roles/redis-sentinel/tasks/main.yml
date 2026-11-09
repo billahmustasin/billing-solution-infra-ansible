@@ -1,0 +1,357 @@
+# roles/redis-sentinel/tasks/main.yml
+---
+- name: Install EPEL repository (RHEL 8/9 — provides redis package)
+  dnf:
+    name: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm"
+    state: present
+  when: not kv_use_valkey | bool
+
+- name: Ensure dnf config-manager is available (to enable extra repos)
+  dnf:
+    name: dnf-plugins-core
+    state: present
+  when: not kv_use_valkey | bool
+
+- name: Enable CRB repository (RHEL/CentOS compatible)
+  command: dnf config-manager --set-enabled crb
+  register: crb_enable
+  failed_when: false
+  changed_when: crb_enable.rc == 0
+  when: not kv_use_valkey | bool
+
+- name: Enable PowerTools repository (some distros)
+  command: dnf config-manager --set-enabled powertools
+  register: pt_enable
+  failed_when: false
+  changed_when: pt_enable.rc == 0
+  when: not kv_use_valkey | bool
+
+- name: Install Valkey (RHEL 10+ AppStream — provides server, CLI, and Sentinel)
+  dnf:
+    name: valkey
+    state: present
+    update_cache: yes
+  when: kv_use_valkey | bool
+
+- name: Install Redis (RHEL 8/9 — provides redis-server, redis-cli, and Sentinel)
+  dnf:
+    name: redis
+    state: present
+    update_cache: yes
+  when: not kv_use_valkey | bool
+
+- name: Ensure engine state directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ kv_user }}"
+    group: "{{ kv_group }}"
+    mode: '0750'
+  loop:
+    - "{{ kv_run_dir }}"
+    - "{{ kv_log_dir }}"
+    - "{{ kv_data_dir }}"
+
+- name: Open Redis server and Sentinel ports in firewalld (master/slave)
+  shell: |
+    firewall-cmd --permanent --add-port={{ redis_port }}/tcp
+    firewall-cmd --permanent --add-port={{ sentinel_port }}/tcp
+    firewall-cmd --reload
+  changed_when: true
+  failed_when: false
+  when: redis_role is defined
+  tags: firewall
+
+- name: Open Sentinel port in firewalld (witness-only node)
+  shell: |
+    firewall-cmd --permanent --add-port={{ sentinel_port }}/tcp
+    firewall-cmd --reload
+  changed_when: true
+  failed_when: false
+  when: redis_role is not defined
+  tags: firewall
+
+- name: Apply packaged tmpfiles definitions
+  command: systemd-tmpfiles --create
+  changed_when: false
+
+- name: Stop Redis/Valkey server before replacing unit files
+  service:
+    name: "{{ kv_service }}"
+    state: stopped
+  when: redis_role is defined
+  failed_when: false
+
+- name: Stop Sentinel before replacing unit files
+  service:
+    name: "{{ kv_sentinel_service }}"
+    state: stopped
+  failed_when: false
+
+- name: Remove stale custom systemd units from earlier playbook runs
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/valkey.service
+    - /etc/systemd/system/valkey-sentinel.service
+    - /etc/systemd/system/redis.service
+    - /etc/systemd/system/redis-sentinel.service
+    - /etc/systemd/system/valkey.service.d
+    - /etc/systemd/system/valkey-sentinel.service.d
+    - /etc/systemd/system/redis.service.d
+    - /etc/systemd/system/redis-sentinel.service.d
+
+- name: Reload systemd after removing stale units
+  command: systemctl daemon-reload
+  changed_when: false
+
+- name: Create tmpfiles.d entry so runtime dir survives reboots (Redis only)
+  copy:
+    dest: /etc/tmpfiles.d/redis.conf
+    content: "d {{ kv_run_dir }} 0755 {{ kv_user }} {{ kv_group }} -\n"
+    owner: root
+    group: root
+    mode: '0644'
+  when: not kv_use_valkey | bool
+
+# ── Redis/Valkey server: only on master + slave nodes ──
+- name: Configure Redis/Valkey server
+  template:
+    src: redis.conf.j2
+    dest: "{{ kv_config_dir }}/{{ kv_server_conf }}"
+    owner: "{{ kv_user }}"
+    group: "{{ kv_group }}"
+    mode: '0640'
+  when: redis_role is defined
+
+- name: Configure Sentinel
+  template:
+    src: sentinel.conf.j2
+    dest: "{{ kv_config_dir }}/sentinel.conf"
+    owner: "{{ kv_user }}"
+    group: "{{ kv_group }}"
+    mode: '0640'
+
+- name: Restore SELinux contexts on engine paths
+  command: restorecon -Rv {{ item }}
+  loop:
+    - "{{ kv_config_dir }}"
+    - "{{ kv_log_dir }}"
+    - "{{ kv_data_dir }}"
+  changed_when: false
+  failed_when: false
+  when: ansible_selinux.status == 'enabled'
+
+- name: Remove stale server pidfile from failed starts
+  file:
+    path: "{{ kv_run_dir }}/{{ kv_service }}.pid"
+    state: absent
+  when: redis_role is defined
+
+- name: Check whether appendonly file exists
+  stat:
+    path: "{{ kv_data_dir }}/appendonly.aof"
+  register: appendonly_file
+  when: redis_role is defined
+
+- name: Repair appendonly file if it exists
+  command: "{{ kv_check_aof_bin }} --fix {{ kv_data_dir }}/appendonly.aof"
+  register: aof_repair
+  changed_when: "'Successfully' in aof_repair.stdout"
+  when:
+    - redis_role is defined
+    - appendonly_file.stat.exists | default(false)
+
+- name: Remove unrecoverable appendonly file
+  file:
+    path: "{{ kv_data_dir }}/appendonly.aof"
+    state: absent
+  when:
+    - redis_role is defined
+    - appendonly_file.stat.exists | default(false)
+    - aof_repair is defined
+    - aof_repair.rc | default(0) != 0
+
+- name: Ensure engine data and log files are owned by service user
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ kv_user }}"
+    group: "{{ kv_group }}"
+    mode: '0750'
+    recurse: yes
+  loop:
+    - "{{ kv_log_dir }}"
+    - "{{ kv_data_dir }}"
+
+- name: Check whether RDB snapshot exists
+  stat:
+    path: "{{ kv_data_dir }}/dump.rdb"
+  register: dump_file
+  when: redis_role is defined
+
+- name: Validate RDB snapshot if it exists
+  command: "{{ kv_check_rdb_bin }} {{ kv_data_dir }}/dump.rdb"
+  register: rdb_check
+  changed_when: false
+  failed_when: false
+  when:
+    - redis_role is defined
+    - dump_file.stat.exists | default(false)
+
+- name: Remove corrupt RDB snapshot
+  file:
+    path: "{{ kv_data_dir }}/dump.rdb"
+    state: absent
+  when:
+    - redis_role is defined
+    - dump_file.stat.exists | default(false)
+    - rdb_check.rc | default(0) != 0
+
+- name: Ensure server port is free before start
+  block:
+    - name: Stop Redis/Valkey server before reclaiming port
+      service:
+        name: "{{ kv_service }}"
+        state: stopped
+      failed_when: false
+
+    - name: Check whether server port is in use
+      command: ss -H -ltn sport = :{{ redis_port }}
+      register: server_port_check
+      changed_when: false
+      failed_when: false
+
+    - name: Terminate stray listener on server port
+      command: fuser -k {{ redis_port }}/tcp
+      register: port_kill
+      failed_when: false
+      changed_when: port_kill.rc == 0
+      when: server_port_check.stdout | trim | length > 0
+
+    - name: Wait for server port to be released
+      wait_for:
+        host: 127.0.0.1
+        port: "{{ redis_port }}"
+        state: stopped
+        timeout: 10
+      when: server_port_check.stdout | trim | length > 0
+
+    - name: Confirm server port is free
+      command: ss -H -ltn sport = :{{ redis_port }}
+      register: server_port_final
+      changed_when: false
+
+    - name: Fail if server port is still in use
+      fail:
+        msg: >-
+          Port {{ redis_port }} is still in use on {{ inventory_hostname }}
+          after stop/kill attempts: {{ server_port_final.stdout }}
+      when: server_port_final.stdout | trim | length > 0
+  when: redis_role is defined
+
+- name: Reset failed state for engine services
+  command: systemctl reset-failed {{ item }}
+  loop:
+    - "{{ kv_service }}"
+    - "{{ kv_sentinel_service }}"
+  changed_when: false
+  failed_when: false
+
+- name: Enable and start Redis/Valkey server
+  block:
+    - name: Start Redis/Valkey server service
+      service:
+        name: "{{ kv_service }}"
+        state: started
+        enabled: yes
+  rescue:
+    - name: Collect Valkey service failure log
+      command: journalctl -u {{ kv_service }} -n 30 --no-pager
+      register: valkey_start_failure
+      changed_when: false
+    - name: Report Valkey service failure
+      fail:
+        msg: |-
+          {{ kv_service }} failed to start on {{ inventory_hostname }}.
+          {{ valkey_start_failure.stdout }}
+  when: redis_role is defined
+
+- name: Ensure sentinel port is free before start
+  block:
+    - name: Stop Sentinel before reclaiming port
+      service:
+        name: "{{ kv_sentinel_service }}"
+        state: stopped
+      failed_when: false
+
+    - name: Check whether sentinel port is in use
+      command: ss -H -ltn sport = :{{ sentinel_port }}
+      register: sentinel_port_check
+      changed_when: false
+      failed_when: false
+
+    - name: Terminate stray listener on sentinel port
+      command: fuser -k {{ sentinel_port }}/tcp
+      register: sentinel_port_kill
+      failed_when: false
+      changed_when: sentinel_port_kill.rc == 0
+      when: sentinel_port_check.stdout | trim | length > 0
+
+    - name: Wait for sentinel port to be released
+      wait_for:
+        host: 127.0.0.1
+        port: "{{ sentinel_port }}"
+        state: stopped
+        timeout: 10
+      when: sentinel_port_check.stdout | trim | length > 0
+
+    - name: Confirm sentinel port is free
+      command: ss -H -ltn sport = :{{ sentinel_port }}
+      register: sentinel_port_final
+      changed_when: false
+
+    - name: Fail if sentinel port is still in use
+      fail:
+        msg: >-
+          Port {{ sentinel_port }} is still in use on {{ inventory_hostname }}
+          after stop/kill attempts: {{ sentinel_port_final.stdout }}
+      when: sentinel_port_final.stdout | trim | length > 0
+
+- name: Enable and start Sentinel
+  block:
+    - name: Start Sentinel service
+      service:
+        name: "{{ kv_sentinel_service }}"
+        state: started
+        enabled: yes
+  rescue:
+    - name: Collect Sentinel service failure log
+      command: journalctl -u {{ kv_sentinel_service }} -n 30 --no-pager
+      register: sentinel_start_failure
+      changed_when: false
+    - name: Report Sentinel service failure
+      fail:
+        msg: |-
+          {{ kv_sentinel_service }} failed to start on {{ inventory_hostname }}.
+          {{ sentinel_start_failure.stdout }}
+
+# ── Wait for quorum and master election ──
+- name: Wait for Sentinel port to listen
+  wait_for:
+    host: 127.0.0.1
+    port: "{{ sentinel_port }}"
+    delay: 5
+    timeout: 120
+    state: started
+
+- name: Wait for Sentinel to form quorum and elect master
+  command: >
+    {{ kv_cli_bin }} -p {{ sentinel_port }}
+    sentinel get-master-addr-by-name {{ sentinel_cluster_name }}
+  register: sentinel_master
+  until: sentinel_master.rc == 0 and sentinel_master.stdout | length > 0
+  retries: 12
+  delay: 5
+  changed_when: false

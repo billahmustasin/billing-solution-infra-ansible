@@ -1,0 +1,48 @@
+---
+# postgres-reassign-owners.yml
+# Transfer schema/object ownership to per-service roles so Liquibase can ALTER.
+# No Postgres restart. Run on Region A leaders only.
+#
+#   ansible-playbook postgres-reassign-owners.yml
+
+- name: Reassign Cluster 1 object owners (leader only)
+  hosts: db_primary
+  become: yes
+  tasks:
+    - name: Copy Cluster 1 owner SQL
+      copy:
+        src: scripts/sql/cluster1-reassign-owners.sql
+        dest: /tmp/cluster1-reassign-owners.sql
+        owner: postgres
+        group: postgres
+        mode: "0600"
+
+    - name: Apply Cluster 1 owner reassignment
+      command: psql -v ON_ERROR_STOP=1 -f /tmp/cluster1-reassign-owners.sql
+      become_user: postgres
+      register: c1_owners
+
+    - name: Show Cluster 1 owner summary
+      debug:
+        msg: "{{ c1_owners.stdout_lines[-30:] }}"
+
+- name: Reassign Cluster 2 object owners (leader only)
+  hosts: db2_primary
+  become: yes
+  tasks:
+    - name: Copy Cluster 2 owner SQL
+      copy:
+        src: scripts/sql/cluster2-reassign-owners.sql
+        dest: /tmp/cluster2-reassign-owners.sql
+        owner: postgres
+        group: postgres
+        mode: "0600"
+
+    - name: Apply Cluster 2 owner reassignment
+      command: psql -v ON_ERROR_STOP=1 -f /tmp/cluster2-reassign-owners.sql
+      become_user: postgres
+      register: c2_owners
+
+    - name: Show Cluster 2 owner summary
+      debug:
+        msg: "{{ c2_owners.stdout_lines[-30:] }}"

@@ -1,0 +1,89 @@
+# roles/haproxy/templates/haproxy.cfg.j2
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    maxconn 4096
+    user haproxy
+    group haproxy
+    daemon
+    stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners
+    stats timeout 30s
+
+defaults
+    log     global
+    mode    tcp
+    option  tcplog
+    option  dontlognull
+    # 2s: fail a busy/unreachable Postgres backend faster than the old 5s stall.
+    timeout connect 2s
+    # Idle DB pool connections (Hikari → HAProxy → Postgres) must survive longer
+    # than app maxLifetime. 30s was closing idle JDBC sockets and caused:
+    # "Failed to validate connection ... This connection has been closed"
+    timeout client  30m
+    timeout server  30m
+    retries 3
+
+#
+# ── Primary write endpoint (port 5432) ──────────────────────────────────────
+# Routes only to the Patroni leader. Patroni's REST API /primary returns
+# HTTP 200 on the leader, HTTP 503 on replicas — HAProxy uses this to
+# automatically detect and route to the current primary.
+#
+frontend pg_primary_frontend
+    bind *:{{ haproxy_primary_port }}
+    default_backend pg_primary_backend
+
+backend pg_primary_backend
+    option httpchk GET /primary
+    http-check expect status 200
+    # inter 2s/fall 2 (~4s) vs 3s/fall 3 (~9s): drop a demoted primary sooner.
+    default-server inter 2s fall 2 rise 2 on-marked-down shutdown-sessions
+{% for host in groups[haproxy_backend_group] %}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:{{ postgres_port | default(5432) }} check port {{ patroni_api_port }}
+{% endfor %}
+
+#
+# ── Read-only replica endpoint (port 5433) ──────────────────────────────────
+# Routes to replicas only. Patroni's /replica returns HTTP 200 on standbys.
+# Useful for read-heavy queries, reporting, analytics.
+#
+frontend pg_replica_frontend
+    bind *:{{ haproxy_replica_port }}
+    default_backend pg_replica_backend
+
+backend pg_replica_backend
+    balance leastconn
+    option httpchk GET /replica
+    http-check expect status 200
+    default-server inter 2s fall 2 rise 2 on-marked-down shutdown-sessions
+{% for host in groups[haproxy_backend_group] %}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:{{ postgres_port | default(5432) }} check port {{ patroni_api_port }}
+{% endfor %}
+
+#
+# ── HAProxy stats page (port 7000) ──────────────────────────────────────────
+# Internal monitoring — restrict to private subnet in production firewall rules
+#
+frontend stats_frontend
+    bind *:{{ haproxy_stats_port }}
+    mode http
+    default_backend stats_backend
+
+backend stats_backend
+    mode http
+    stats enable
+    stats uri /stats
+    stats refresh 5s
+    stats auth {{ haproxy_stats_user }}:{{ haproxy_stats_password }}
+    stats show-legends
+    stats show-node
+
+#
+# ── Prometheus metrics (port 8404) ──────────────────────────────────────────
+# Scraped by Prometheus in k8s monitoring. Firewall: 172.17.0.0/16 only.
+#
+frontend prometheus_exporter
+    bind *:8404
+    mode http
+    http-request use-service prometheus-exporter if { path /metrics }
+    no log

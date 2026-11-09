@@ -1,0 +1,6 @@
+---
+- name: Fix Cluster 2 HAProxy backends
+  hosts: db2_all
+  become: yes
+  roles:
+    - haproxy

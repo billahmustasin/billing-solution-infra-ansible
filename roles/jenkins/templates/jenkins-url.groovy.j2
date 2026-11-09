@@ -1,0 +1,10 @@
+// {{ ansible_managed }}
+// Set Jenkins root URL for reverse-proxy HTTPS (no domain — IP-based for now)
+import jenkins.model.JenkinsLocationConfiguration
+
+def location = JenkinsLocationConfiguration.get()
+def targetUrl = "{{ jenkins_public_url }}"
+if (location.getUrl() != targetUrl) {
+    location.setUrl(targetUrl)
+    location.save()
+}

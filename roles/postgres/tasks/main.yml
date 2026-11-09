@@ -1,0 +1,35 @@
+# roles/postgres/tasks/main.yml
+---
+- name: Install prerequisites (RHEL/Amazon Linux)
+  dnf:
+    name:
+      - curl
+      - ca-certificates
+      - gnupg2
+      - python3-psycopg2
+    state: present
+    update_cache: yes
+
+- name: Install PGDG repository RPM (idempotent)
+  dnf:
+    name: "https://download.postgresql.org/pub/repos/yum/reporpms/EL-10-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+    state: present
+    disable_gpg_check: yes
+
+
+- name: Install PostgreSQL 16 packages
+  dnf:
+    name:
+      - postgresql16-server
+      - postgresql16
+      - postgresql16-contrib
+    state: present
+    update_cache: yes
+
+# Patroni manages PostgreSQL directly — make sure the distro unit doesn't conflict
+- name: Stop and disable default PostgreSQL service (Patroni will manage it)
+  service:
+    name: "postgresql-16"
+    state: stopped
+    enabled: no
+  ignore_errors: yes

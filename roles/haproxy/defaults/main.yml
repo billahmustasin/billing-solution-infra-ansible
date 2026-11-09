@@ -1,0 +1,3 @@
+---
+# Inventory group whose Patroni/PgBouncer nodes back this HAProxy instance.
+haproxy_backend_group: db_all

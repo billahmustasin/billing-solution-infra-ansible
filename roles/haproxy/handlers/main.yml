@@ -1,0 +1,16 @@
+# roles/haproxy/handlers/main.yml
+---
+- name: Reload HAProxy
+  service:
+    name: haproxy
+    state: reloaded
+
+- name: Restart HAProxy
+  service:
+    name: haproxy
+    state: restarted
+
+- name: Restart keepalived
+  service:
+    name: keepalived
+    state: restarted

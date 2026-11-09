@@ -1,0 +1,9 @@
+---
+- name: Reload systemd
+  command: systemctl daemon-reload
+  changed_when: false
+
+- name: Restart kafka
+  service:
+    name: kafka
+    state: restarted

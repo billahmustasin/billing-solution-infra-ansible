@@ -1,0 +1,8 @@
+# Copy to vault.yml and fill in real values:
+#   cp group_vars/db_all/vault.yml.example group_vars/db_all/vault.yml
+app_db_password: "CHANGE_ME"
+ops_db_password: "CHANGE_ME"
+metrics_exporter_password: "CHANGE_ME"
+postgres_password: "CHANGE_ME"
+replication_password: "CHANGE_ME"
+pgbouncer_password: "CHANGE_ME"

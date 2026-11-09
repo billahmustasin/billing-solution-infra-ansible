@@ -1,0 +1,4 @@
+# roles/redis-sentinel/handlers/main.yml
+---
+# Handlers intentionally empty — services are started explicitly in tasks after
+# config validation so failures surface with actionable errors.

@@ -1,0 +1,10 @@
+---
+- name: Restart jenkins
+  service:
+    name: jenkins
+    state: restarted
+
+- name: Reload nginx
+  service:
+    name: nginx
+    state: reloaded

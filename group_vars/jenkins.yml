@@ -1,0 +1,17 @@
+# group_vars/jenkins.yml
+# Jenkins LTS — CI/CD server behind nginx HTTPS reverse proxy
+# Version: 2.555.3 (pinned via jenkins-2.555.3-1 RPM)
+
+# Public NAT IP — browser URL and TLS cert CN/SAN
+jenkins_public_ip: "45.114.84.54"
+jenkins_public_url: "https://{{ jenkins_public_ip }}/"
+
+# ── INCOMING TRAFFIC ──
+#
+# | Port  | Protocol | Source    | Purpose                        |
+# |-------|----------|-----------|--------------------------------|
+# | 443   | TCP      | Internet  | Jenkins UI via nginx (HTTPS)   |
+# | 50000 | TCP      | Agents    | Inbound JNLP agents (if used)  |
+#
+# NAT: 45.114.84.54:443 -> 172.17.105.16:443 (nginx, NOT 8080)
+# Do NOT expose 8080 publicly — Jenkins is localhost-only behind nginx.

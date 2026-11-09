@@ -1,0 +1,7 @@
+# roles/db-exporters/defaults/main.yml
+node_exporter_version: "1.8.2"
+postgres_exporter_version: "0.15.0"
+pgbouncer_exporter_version: "0.10.0"
+exporter_arch: linux-amd64
+exporter_install_dir: /usr/local/bin
+exporter_listen_source: "172.17.0.0/16"

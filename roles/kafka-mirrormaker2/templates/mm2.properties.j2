@@ -1,0 +1,30 @@
+# {{ mm2_config_file }} — managed by Ansible
+# {{ ansible_managed }}
+# Bidirectional MirrorMaker 2 — Option C cross-region replication
+
+clusters = {{ mm2_cluster_primary_alias }}, {{ mm2_cluster_dr_alias }}
+{{ mm2_cluster_primary_alias }}.bootstrap.servers = {{ mm2_primary_bootstrap }}
+{{ mm2_cluster_dr_alias }}.bootstrap.servers = {{ mm2_dr_bootstrap }}
+
+{{ mm2_cluster_primary_alias }}->{{ mm2_cluster_dr_alias }}.enabled = true
+{{ mm2_cluster_dr_alias }}->{{ mm2_cluster_primary_alias }}.enabled = true
+
+{{ mm2_cluster_primary_alias }}->{{ mm2_cluster_dr_alias }}.topics = {{ mm2_topics_pattern }}
+{{ mm2_cluster_dr_alias }}->{{ mm2_cluster_primary_alias }}.topics = {{ mm2_topics_pattern }}
+
+{{ mm2_cluster_primary_alias }}->{{ mm2_cluster_dr_alias }}.tasks.max = {{ mm2_tasks_max }}
+{{ mm2_cluster_dr_alias }}->{{ mm2_cluster_primary_alias }}.tasks.max = {{ mm2_tasks_max }}
+
+{{ mm2_cluster_primary_alias }}->{{ mm2_cluster_dr_alias }}.replication.factor = {{ mm2_replication_factor }}
+{{ mm2_cluster_dr_alias }}->{{ mm2_cluster_primary_alias }}.replication.factor = {{ mm2_replication_factor }}
+
+replication.policy.class = org.apache.kafka.connect.mirror.DefaultReplicationPolicy
+refresh.topics.interval.seconds = {{ mm2_refresh_topics_interval_seconds }}
+refresh.groups.interval.seconds = {{ mm2_refresh_groups_interval_seconds }}
+sync.topic.acls.enabled = false
+emit.heartbeats.enabled = true
+emit.checkpoints.enabled = true
+
+offset.syncs.topic.replication.factor = {{ mm2_replication_factor }}
+heartbeats.topic.replication.factor = {{ mm2_replication_factor }}
+checkpoints.topic.replication.factor = {{ mm2_replication_factor }}

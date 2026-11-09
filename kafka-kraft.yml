@@ -1,0 +1,21 @@
+---
+# kafka-kraft.yml
+# Provisions a 2-broker + 1 controller-witness Kafka KRaft cluster (no ZooKeeper).
+#
+#   Broker 1 — controller + broker (kafka_broker_id=1)
+#   Broker 2 — controller + broker (kafka_broker_id=2)
+#   Witness  — controller only on etcd-witness (kafka_broker_id=3)
+#
+#   replication.factor = 2, min.insync.replicas = 1
+#   3-node controller quorum survives loss of any single node
+#   MirrorMaker 2 (Region A ↔ B): ansible-playbook kafka-mirrormaker2.yml
+
+- name: Provision Kafka KRaft — Region A
+  hosts: kafka_kraft
+  become: yes
+  gather_facts: yes
+  vars_files:
+    - group_vars/kafka_kraft.yml
+
+  roles:
+    - role: kafka-kraft

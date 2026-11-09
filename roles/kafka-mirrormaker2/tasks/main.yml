@@ -1,0 +1,96 @@
+# roles/kafka-mirrormaker2/tasks/main.yml
+---
+- name: Verify Kafka install exists (run kafka-kraft.yml first)
+  stat:
+    path: "{{ kafka_install_dir }}/bin/connect-mirror-maker.sh"
+  register: mm2_kafka_bin
+
+- name: Fail when Kafka is not installed on MM2 host
+  fail:
+    msg: >-
+      {{ kafka_install_dir }}/bin/connect-mirror-maker.sh not found on {{ inventory_hostname }}.
+      Run ansible-playbook kafka-kraft.yml on this host first.
+  when: not mm2_kafka_bin.stat.exists
+
+- name: Ensure MM2 log directory exists
+  file:
+    path: "{{ kafka_log4j_dir }}"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: "0750"
+
+- name: Install logrotate package
+  dnf:
+    name: logrotate
+    state: present
+
+- name: Install Kafka logrotate config
+  template:
+    src: logrotate-kafka.j2
+    dest: /etc/logrotate.d/kafka
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure MirrorMaker 2
+  template:
+    src: mm2.properties.j2
+    dest: "{{ mm2_config_file }}"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: "0640"
+  notify: Restart kafka-mirrormaker2
+
+- name: Install MirrorMaker 2 systemd unit
+  template:
+    src: mirrormaker.service.j2
+    dest: /etc/systemd/system/kafka-mirrormaker2.service
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart kafka-mirrormaker2
+
+- name: Install MM2 lag check script
+  template:
+    src: check-mm2-lag.sh.j2
+    dest: "{{ mm2_lag_check_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Schedule MM2 lag check cron
+  cron:
+    name: kafka-mm2-lag-check
+    minute: "{{ mm2_lag_check_cron_minute }}"
+    job: "{{ mm2_lag_check_script }}"
+    user: root
+
+- name: Flush handlers before start
+  meta: flush_handlers
+
+- name: Enable and start MirrorMaker 2
+  service:
+    name: kafka-mirrormaker2
+    state: started
+    enabled: yes
+
+- name: Wait for MirrorMaker 2 process to be running
+  command: systemctl is-active kafka-mirrormaker2
+  register: mm2_active
+  until: mm2_active.stdout == "active"
+  retries: 12
+  delay: 10
+  changed_when: false
+
+- name: Verify Primary cluster is reachable from MM2 host
+  command: >-
+    {{ kafka_install_dir }}/bin/kafka-broker-api-versions.sh
+    --bootstrap-server {{ mm2_primary_bootstrap }}
+  changed_when: false
+
+- name: Verify DR cluster is reachable from MM2 host
+  command: >-
+    {{ kafka_install_dir }}/bin/kafka-broker-api-versions.sh
+    --bootstrap-server {{ mm2_dr_bootstrap }}
+  changed_when: false

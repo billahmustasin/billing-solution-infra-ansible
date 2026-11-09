@@ -1,0 +1,26 @@
+-- Cluster 2 leader. Read-only metrics login. Replicates to db-a2b.
+
+DO $$
+BEGIN
+  CREATE ROLE metrics_exporter LOGIN
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+    PASSWORD '{{ metrics_exporter_password | replace("'", "''") }}';
+EXCEPTION
+  WHEN duplicate_object THEN
+    ALTER ROLE metrics_exporter WITH LOGIN
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+      PASSWORD '{{ metrics_exporter_password | replace("'", "''") }}';
+END
+$$;
+
+GRANT pg_monitor TO metrics_exporter;
+GRANT CONNECT ON DATABASE postgres TO metrics_exporter;
+GRANT CONNECT ON DATABASE race_core_service TO metrics_exporter;
+GRANT CONNECT ON DATABASE race_superapp TO metrics_exporter;
+GRANT CONNECT ON DATABASE race_customer_chat TO metrics_exporter;
+REVOKE CREATE ON DATABASE postgres FROM metrics_exporter;
+REVOKE CREATE ON DATABASE race_core_service FROM metrics_exporter;
+REVOKE CREATE ON DATABASE race_superapp FROM metrics_exporter;
+REVOKE CREATE ON DATABASE race_customer_chat FROM metrics_exporter;
+
+SELECT rolname, rolsuper, rolcreatedb FROM pg_roles WHERE rolname = 'metrics_exporter';

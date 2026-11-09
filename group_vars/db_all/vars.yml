@@ -1,0 +1,32 @@
+# group_vars/db_all/vars.yml — non-secret config (safe to commit)
+pg_version: 16
+# RHEL/PGDG paths (Amazon Linux 2023 / RHEL 9)
+pg_data_dir: /var/lib/pgsql/16/data
+pg_config_dir: /etc/postgresql/16/main
+
+# Patroni cluster name (Cluster 1)
+patroni_cluster_name: myrace-pg-cluster-1
+
+# All three etcd members — Patroni needs at least one reachable endpoint;
+# listing all three makes the DCS connection resilient to a single etcd failure.
+etcd_endpoints: "http://172.17.106.2:2379,http://172.17.106.3:2379,http://172.17.106.6:2379"
+
+app_db_user: production_db_user
+# Developer/ops login (not used by app pods). Same DDL/DML as old production_db_user,
+# except cannot CREATE/DROP databases. Separate password; PgBouncer pool_size 5.
+ops_db_user: race_ops_user
+ops_db_pool_size: 5
+# Prometheus exporters (pg_monitor + PgBouncer SHOW STATS). Direct 5432, not app pools.
+metrics_exporter_user: metrics_exporter
+# Per-service logins (same password). PgBouncer pools by (database, user).
+app_db_service_roles:
+  - race_billing_srv_user
+  - race_entity_srv_user
+  - race_meta_srv_user
+  - race_invoice_srv_user
+  - race_report_srv_user
+  - race_appadmin_srv_user
+  - race_billing_user
+  - race_partner_user
+
+pgbackrest_repo_path: /var/lib/pgbackrest

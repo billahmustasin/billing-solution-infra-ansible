@@ -1,0 +1,13 @@
+---
+# minio.yml
+# Provisions MinIO object storage for Region A (S3-compatible).
+# Diagram: backups + archives, port 9000, bidirectional replication to Region B.
+
+- name: Provision MinIO — Region A
+  hosts: minio
+  become: yes
+  gather_facts: yes
+  # Secrets: group_vars/minio/vault.yml (gitignored)
+
+  roles:
+    - role: minio

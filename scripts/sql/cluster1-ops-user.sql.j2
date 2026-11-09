@@ -1,0 +1,110 @@
+-- Cluster 1 leader. Human/ops login — not for application pods.
+-- Same capability as the old production_db_user: DML+DDL on all C1 DBs/schemas,
+-- but NOCREATEDB / cannot CREATE or DROP databases. Not a superuser.
+-- Membership in per-service owner roles is required for ALTER TABLE after
+-- ownership was moved off production_db_user.
+
+DO $$
+BEGIN
+  CREATE ROLE race_ops_user LOGIN
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+    PASSWORD '{{ ops_db_password | replace("'", "''") }}';
+EXCEPTION
+  WHEN duplicate_object THEN
+    ALTER ROLE race_ops_user WITH LOGIN
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+      PASSWORD '{{ ops_db_password | replace("'", "''") }}';
+END
+$$;
+
+GRANT CONNECT, TEMPORARY ON DATABASE race_core_service TO race_ops_user;
+GRANT CONNECT, TEMPORARY ON DATABASE race_billing TO race_ops_user;
+GRANT CONNECT, TEMPORARY ON DATABASE race_partner TO race_ops_user;
+REVOKE CREATE ON DATABASE race_core_service FROM race_ops_user;
+REVOKE CREATE ON DATABASE race_billing FROM race_ops_user;
+REVOKE CREATE ON DATABASE race_partner FROM race_ops_user;
+
+GRANT race_billing_srv_user, race_entity_srv_user, race_meta_srv_user,
+      race_invoice_srv_user, race_report_srv_user, race_appadmin_srv_user,
+      race_billing_user, race_partner_user TO race_ops_user;
+
+\c race_core_service
+
+GRANT USAGE ON SCHEMA public TO race_ops_user;
+
+GRANT USAGE, CREATE ON SCHEMA race_billing_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_billing_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_billing_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_billing_srv TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_billing_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_billing_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_billing_srv_user IN SCHEMA race_billing_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_billing_srv_user IN SCHEMA race_billing_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+
+GRANT USAGE, CREATE ON SCHEMA race_entity_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_entity_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_entity_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_entity_srv TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_entity_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_entity_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_entity_srv_user IN SCHEMA race_entity_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_entity_srv_user IN SCHEMA race_entity_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+
+GRANT USAGE, CREATE ON SCHEMA race_meta_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_meta_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_meta_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_meta_srv TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_meta_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_meta_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_meta_srv_user IN SCHEMA race_meta_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_meta_srv_user IN SCHEMA race_meta_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+
+GRANT USAGE, CREATE ON SCHEMA race_invoice_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_invoice_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_invoice_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_invoice_srv TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_invoice_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_invoice_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_invoice_srv_user IN SCHEMA race_invoice_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_invoice_srv_user IN SCHEMA race_invoice_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+
+GRANT USAGE, CREATE ON SCHEMA race_report_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_report_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_report_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_report_srv TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_report_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_report_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_report_srv_user IN SCHEMA race_report_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_report_srv_user IN SCHEMA race_report_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+
+GRANT USAGE, CREATE ON SCHEMA race_appadmin_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA race_appadmin_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA race_appadmin_srv TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA race_appadmin_srv TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_appadmin_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA race_appadmin_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_appadmin_srv_user IN SCHEMA race_appadmin_srv GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_appadmin_srv_user IN SCHEMA race_appadmin_srv GRANT ALL ON SEQUENCES TO race_ops_user;
+
+\c race_billing
+GRANT USAGE, CREATE ON SCHEMA public TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_billing_user IN SCHEMA public GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_billing_user IN SCHEMA public GRANT ALL ON SEQUENCES TO race_ops_user;
+
+\c race_partner
+GRANT USAGE, CREATE ON SCHEMA public TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO race_ops_user;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_partner_user IN SCHEMA public GRANT ALL ON TABLES TO race_ops_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE race_partner_user IN SCHEMA public GRANT ALL ON SEQUENCES TO race_ops_user;
+
+SELECT rolname, rolsuper, rolcreatedb, rolcanlogin
+FROM pg_roles WHERE rolname = 'race_ops_user';

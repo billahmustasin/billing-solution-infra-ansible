@@ -1,0 +1,26 @@
+# roles/pgbouncer/templates/pgbouncer.ini.j2
+[databases]
+* = host=127.0.0.1 port=5432
+
+[pgbouncer]
+listen_addr     = 0.0.0.0
+listen_port     = 6432
+auth_type       = md5
+auth_file       = /etc/pgbouncer/userlist.txt
+# session mode + track search_path — JDBC currentSchema=... sends search_path at connect.
+pool_mode       = session
+track_extra_parameters = search_path,application_name
+# JDBC drivers may send extra_float_digits; safe to ignore (do NOT list search_path here).
+ignore_startup_parameters = extra_float_digits
+max_client_conn = 1000
+# Per (database, user) session backends. Keep the sum under Postgres max_connections (live: 100).
+# Shared production_db_user at 20 exhausted race_core_service (Phase 0). After per-service roles, 10 each fits.
+default_pool_size = 10
+# Console access for pool observation (SHOW POOLS / SHOW STATS). Reload-only; does not change pooling.
+admin_users     = postgres
+stats_users     = postgres
+# Keep server links long enough for app pools; apps should retire connections sooner.
+server_idle_timeout = 600
+server_lifetime     = 3600
+server_check_delay  = 30
+pidfile         = /var/run/pgbouncer/pgbouncer.pid

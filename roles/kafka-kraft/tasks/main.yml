@@ -1,0 +1,217 @@
+# roles/kafka-kraft/tasks/main.yml
+---
+- name: Install Java and prerequisites
+  dnf:
+    name:
+      - "{{ kafka_java_package }}"
+      - curl
+      - tar
+    state: present
+    update_cache: yes
+
+- name: Resolve Java home path
+  stat:
+    path: "{{ kafka_java_home_default }}"
+  register: java_home_path
+
+- name: Set Java home fact
+  set_fact:
+    kafka_java_home: >-
+      {{ kafka_java_home_default
+         if java_home_path.stat.isdir | default(false)
+         else (ansible_env.JAVA_HOME | default(kafka_java_home_default)) }}
+
+- name: Create kafka system user
+  user:
+    name: "{{ kafka_user }}"
+    system: yes
+    shell: /sbin/nologin
+    home: "{{ kafka_log_dir }}"
+    create_home: no
+
+- name: Create kafka directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0750'
+  loop:
+    - "{{ kafka_install_dir }}"
+    - "{{ kafka_config_dir }}"
+    - "{{ kafka_log_dir }}"
+    - "{{ kafka_log_dir }}/data"
+    - "{{ kafka_log4j_dir }}"
+
+- name: Check whether Kafka is already installed
+  stat:
+    path: "{{ kafka_install_dir }}/bin/kafka-server-start.sh"
+  register: kafka_installed
+
+- name: Download Kafka archive
+  block:
+    - name: Download Kafka archive from primary CDN
+      get_url:
+        url: "{{ kafka_download_base }}/{{ kafka_archive }}"
+        dest: "/tmp/{{ kafka_archive }}"
+        mode: '0644'
+        timeout: 300
+  rescue:
+    - name: Download Kafka archive from Apache mirror
+      get_url:
+        url: "{{ kafka_download_mirror }}/{{ kafka_archive }}"
+        dest: "/tmp/{{ kafka_archive }}"
+        mode: '0644'
+        timeout: 300
+  when: not kafka_installed.stat.exists
+
+- name: Extract Kafka into install directory
+  unarchive:
+    src: "/tmp/{{ kafka_archive }}"
+    dest: /opt
+    remote_src: yes
+    creates: "/opt/kafka_{{ kafka_scala_version }}-{{ kafka_version }}/bin/kafka-server-start.sh"
+  when: not kafka_installed.stat.exists
+
+- name: Symlink Kafka install directory
+  file:
+    src: "/opt/kafka_{{ kafka_scala_version }}-{{ kafka_version }}"
+    dest: "{{ kafka_install_dir }}"
+    state: link
+    force: yes
+
+- name: Generate Kafka cluster ID when not provided
+  command: "{{ kafka_install_dir }}/bin/kafka-storage.sh random-uuid"
+  register: kafka_cluster_id_generated
+  delegate_to: "{{ groups['kafka_kraft'] | sort | first }}"
+  run_once: true
+  changed_when: false
+  when: kafka_cluster_id | length == 0
+
+- name: Set effective cluster ID on all hosts
+  set_fact:
+    kafka_cluster_id_effective: >-
+      {{ kafka_cluster_id
+         if kafka_cluster_id | length > 0
+         else kafka_cluster_id_generated.stdout | trim }}
+
+- name: Configure Kafka server
+  template:
+    src: server.properties.j2
+    dest: "{{ kafka_config_dir }}/server.properties"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0640'
+
+- name: Configure Kafka logging
+  template:
+    src: log4j.properties.j2
+    dest: "{{ kafka_config_dir }}/log4j.properties"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0640'
+
+- name: Install Kafka systemd unit
+  template:
+    src: kafka.service.j2
+    dest: /etc/systemd/system/kafka.service
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Reload systemd
+  meta: flush_handlers
+
+- name: Check whether KRaft storage is already formatted
+  stat:
+    path: "{{ kafka_log_dir }}/data/meta.properties"
+  register: kafka_meta
+
+- name: Format KRaft storage
+  command: >-
+    {{ kafka_install_dir }}/bin/kafka-storage.sh format
+    -t {{ kafka_cluster_id_effective }}
+    -c {{ kafka_config_dir }}/server.properties
+  when: not kafka_meta.stat.exists
+
+- name: Restore SELinux contexts on kafka paths
+  command: restorecon -Rv {{ item }}
+  loop:
+    - "{{ kafka_config_dir }}"
+    - "{{ kafka_log_dir }}"
+    - "{{ kafka_log4j_dir }}"
+  changed_when: false
+  failed_when: false
+  when: ansible_selinux.status == 'enabled'
+
+- name: Install logrotate package
+  dnf:
+    name: logrotate
+    state: present
+
+- name: Install Kafka logrotate config
+  template:
+    src: logrotate-kafka.j2
+    dest: /etc/logrotate.d/kafka
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Open Kafka broker ports in firewalld
+  shell: |
+    firewall-cmd --permanent --add-port={{ kafka_port }}/tcp
+    firewall-cmd --permanent --add-port={{ kafka_controller_port }}/tcp
+    firewall-cmd --reload
+  changed_when: true
+  failed_when: false
+  when: kafka_role != 'controller'
+
+- name: Open Kafka controller port in firewalld (witness)
+  shell: |
+    firewall-cmd --permanent --add-port={{ kafka_controller_port }}/tcp
+    firewall-cmd --reload
+  changed_when: true
+  failed_when: false
+  when: kafka_role == 'controller'
+
+- name: Enable Kafka service
+  service:
+    name: kafka
+    enabled: yes
+
+# All brokers must start together so the KRaft quorum can form.
+- name: Start Kafka on all nodes simultaneously (async)
+  service:
+    name: kafka
+    state: started
+  async: 180
+  poll: 0
+  register: kafka_start_job
+
+- name: Wait for Kafka client port to listen
+  wait_for:
+    host: "{{ ansible_default_ipv4.address }}"
+    port: "{{ kafka_port }}"
+    delay: 10
+    timeout: 180
+    state: started
+  when: kafka_role != 'controller'
+
+- name: Wait for Kafka controller port to listen
+  wait_for:
+    host: "{{ ansible_default_ipv4.address }}"
+    port: "{{ kafka_controller_port }}"
+    delay: 5
+    timeout: 60
+    state: started
+
+- name: Verify broker responds to API versions request
+  command: >-
+    {{ kafka_install_dir }}/bin/kafka-broker-api-versions.sh
+    --bootstrap-server {{ hostvars[groups['kafka_broker'] | sort | first]['ansible_default_ipv4']['address'] }}:{{ kafka_port }}
+  register: kafka_api_check
+  until: kafka_api_check.rc == 0
+  retries: 12
+  delay: 5
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ groups['kafka_broker'] | sort | first }}"

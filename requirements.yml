@@ -1,0 +1,6 @@
+---
+# Optional Ansible collections (control node only).
+# DB playbooks use psql/shell — community.postgresql is not required.
+collections:
+  - name: ansible.posix
+    version: ">=1.5.0"

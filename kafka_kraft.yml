@@ -1,0 +1,38 @@
+# group_vars/kafka_kraft.yml
+# Kafka KRaft — 2 brokers + 1 controller witness (no ZooKeeper)
+#
+# Architecture (per region):
+#   Broker 1 — combined controller + broker (node.id=1, kafka-a1)
+#   Broker 2 — combined controller + broker (node.id=2, kafka-a2)
+#   Witness  — controller only on etcd-witness (node.id=3, 172.17.106.6)
+#
+#   3-node controller quorum — survives loss of any single node
+#   replication.factor = 2        every partition on both brokers
+#   min.insync.replicas = 1       writes succeed if 1 broker is alive
+#   MirrorMaker 2                 bidirectional replication Region A ↔ Region B
+#
+# Each broker host must set kafka_broker_id (1 or 2) in inventory.
+# etcd-witness sets kafka_broker_id=3 and kafka_role=controller.
+#
+# Migrating an existing 2-node cluster: stop all Kafka nodes, run this playbook
+# (witness formats on first run; brokers pick up the new voter list), then start.
+
+kafka_default_replication_factor: 2
+kafka_min_insync_replicas: 1
+kafka_num_partitions: 3
+kafka_cluster_id: "L0pUGZ80TOyvOFlRCds1gw"
+
+# ── INCOMING TRAFFIC — open on each Kafka host security group ──
+#
+# | Port  | Protocol | Host(s)                        | Source                         | Purpose                         |
+# |-------|----------|--------------------------------|--------------------------------|---------------------------------|
+# | 9092  | TCP      | kafka-a1, kafka-a2             | App worker nodes (same region) | Producers / consumers / apps    |
+# | 9092  | TCP      | kafka-a1, kafka-a2             | Remote region brokers + MM2    | Cross-region MirrorMaker 2      |
+# | 9092  | TCP      | kafka-a1, kafka-a2             | Health-check / monitoring      | DNS health check, kafka-cli     |
+# | 9093  | TCP      | kafka-a1, kafka-a2, witness    | Peer controllers only          | KRaft Raft quorum (internal)    |
+#
+# 9092 is client-facing on brokers only. 9093 is controller traffic on all 3 nodes.
+# Do NOT expose 9093 to app subnets or the public internet.
+#
+# MirrorMaker host also needs outbound TCP 9092 to brokers in both regions.
+# Provision with: ansible-playbook kafka-mirrormaker2.yml

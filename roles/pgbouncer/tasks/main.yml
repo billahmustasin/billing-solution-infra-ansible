@@ -1,0 +1,9 @@
+# PgBouncer is not on the application path.
+# HAProxy sends VIP :5000 to Postgres :5432. This role only keeps the service stopped.
+---
+- name: Stop and disable PgBouncer
+  service:
+    name: pgbouncer
+    state: stopped
+    enabled: no
+  failed_when: false

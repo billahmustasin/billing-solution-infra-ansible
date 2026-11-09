@@ -1,0 +1,23 @@
+---
+# PgBouncer is not on the application path.
+# HAProxy :5000 sends traffic to Postgres :5432 on the Patroni leader.
+# This playbook only keeps the service stopped. It does not install or start it.
+#
+#   ansible-playbook pgbouncer-config.yml
+
+- name: Keep PgBouncer stopped on Cluster 1 and Cluster 2
+  hosts: db_all:db2_all
+  become: yes
+  tasks:
+    - name: Stop and disable PgBouncer
+      service:
+        name: pgbouncer
+        state: stopped
+        enabled: no
+      failed_when: false
+
+    - name: Confirm application path
+      debug:
+        msg: >-
+          {{ inventory_hostname }}: PgBouncer stays stopped.
+          Applications use the cluster VIP port 5000, and HAProxy forwards to Postgres port 5432.

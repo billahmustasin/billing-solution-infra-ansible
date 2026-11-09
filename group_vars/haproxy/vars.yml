@@ -1,0 +1,20 @@
+# group_vars/haproxy/vars.yml — Cluster 1 HAProxy / Keepalived (non-secret)
+
+haproxy_backend_group: db_all
+
+# Free IP in 172.17.106.0/24 (same subnet as db-a1a / db-a1b)
+haproxy_vip: "172.17.106.200"
+haproxy_vip_prefix: "24"
+
+haproxy_vrrp_id: 51
+haproxy_master_node: "db-a1a"
+
+haproxy_primary_port: 5000
+haproxy_replica_port: 5001
+haproxy_stats_port: 7000
+
+# Apps use VIP :5000. HAProxy forwards to Postgres on the Patroni leader, not PgBouncer.
+postgres_port: 5432
+patroni_api_port: 8008
+
+haproxy_stats_user: "admin"

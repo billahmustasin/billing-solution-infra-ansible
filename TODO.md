@@ -1,0 +1,4 @@
+- [x] Update roles/redis-sentinel/tasks/main.yml package installation for RedHat 10: remove unavailable `redis-sentinel` package and rely on `redis` package binaries for Sentinel.
+- [x] Add EPEL 10 repository enablement in roles/redis-sentinel/tasks/main.yml.
+- [x] Migrate redis-sentinel role to Valkey on RHEL 10+ (`redis` package removed from AppStream; install `valkey` instead).
+- [ ] Re-run the redis-sentinel Ansible play to confirm package installation succeeds and `valkey-sentinel` service starts cleanly.

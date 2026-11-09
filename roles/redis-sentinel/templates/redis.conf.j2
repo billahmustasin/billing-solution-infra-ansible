@@ -1,0 +1,66 @@
+# {{ kv_config_dir }}/{{ kv_server_conf }} — managed by Ansible
+# {{ ansible_managed }}
+
+bind {{ redis_bind_address }}
+protected-mode yes
+port {{ redis_port }}
+
+{% if redis_role | default('master') == 'master' %}
+masterauth {{ redis_require_password }}
+requirepass {{ redis_require_password }}
+{% else %}
+# Slave node — will be configured by Sentinel on promote
+replicaof {{ sentinel_master_ip }} {{ sentinel_master_port }}
+masterauth {{ redis_require_password }}
+requirepass {{ redis_require_password }}
+{% endif %}
+
+daemonize no
+supervised systemd
+pidfile {{ kv_run_dir }}/{{ kv_service }}.pid
+loglevel notice
+logfile {{ kv_log_dir }}/{{ kv_service }}.log
+
+databases 16
+dir {{ kv_data_dir }}
+
+# Persistence — RDB snapshots for crash recovery
+save 900 1
+save 300 10
+save 60 10000
+stop-writes-on-bgsave-error yes
+rdbcompression yes
+rdbchecksum yes
+dbfilename dump.rdb
+
+# Replication
+replica-serve-stale-data yes
+replica-read-only yes
+repl-diskless-sync no
+repl-diskless-sync-delay 5
+repl-disable-tcp-nodelay no
+replica-priority {{ 100 if redis_role | default('master') == 'master' else 90 }}
+
+# Security
+rename-command FLUSHDB ""
+rename-command FLUSHALL ""
+
+# Memory
+maxmemory {{ redis_maxmemory | default('256mb') }}
+maxmemory-policy allkeys-lru
+
+# Append-only file for durability
+appendonly yes
+appendfilename "appendonly.aof"
+appendfsync everysec
+no-appendfsync-on-rewrite no
+auto-aof-rewrite-percentage 100
+auto-aof-rewrite-min-size 64mb
+
+# Slow log
+slowlog-log-slower-than 10000
+slowlog-max-len 128
+
+# Client limits
+maxclients 10000
+timeout 300

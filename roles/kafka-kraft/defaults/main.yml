@@ -1,0 +1,49 @@
+---
+kafka_version: "4.3.0"
+kafka_scala_version: "2.13"
+kafka_download_base: "https://archive.apache.org/dist/kafka/{{ kafka_version }}"
+kafka_download_mirror: "https://dlcdn.apache.org/kafka/{{ kafka_version }}"
+kafka_archive: "kafka_{{ kafka_scala_version }}-{{ kafka_version }}.tgz"
+
+kafka_user: kafka
+kafka_group: kafka
+kafka_install_dir: /opt/kafka
+kafka_config_dir: /etc/kafka
+kafka_log_dir: /var/lib/kafka
+kafka_log4j_dir: /var/log/kafka
+
+# Client / producer / consumer / MirrorMaker (brokers only)
+kafka_port: 9092
+# KRaft controller quorum (all kafka_kraft nodes)
+kafka_controller_port: 9093
+
+# broker (default) = broker+controller; controller = witness node only
+kafka_role: broker
+kafka_process_roles: "{{ 'controller' if kafka_role == 'controller' else 'broker,controller' }}"
+
+kafka_num_partitions: 3
+kafka_default_replication_factor: 2
+kafka_min_insync_replicas: 1
+kafka_log_retention_hours: 168
+kafka_heap_opts: "-Xms1g -Xmx1g"
+kafka_controller_heap_opts: "-Xms512m -Xmx512m"
+kafka_heap_opts_effective: "{{ kafka_controller_heap_opts if kafka_role == 'controller' else kafka_heap_opts }}"
+
+kafka_logrotate_frequency: daily
+kafka_logrotate_rotate: 14
+kafka_logrotate_maxsize: 100M
+
+# RHEL 10+ ships OpenJDK 21; RHEL 8/9 use OpenJDK 17
+kafka_java_package: "{{ 'java-21-openjdk-headless' if ansible_distribution_major_version | int >= 10 else 'java-17-openjdk-headless' }}"
+kafka_java_home_default: "{{ '/usr/lib/jvm/java-21-openjdk' if ansible_distribution_major_version | int >= 10 else '/usr/lib/jvm/java-17-openjdk' }}"
+
+# Set explicitly to reuse an existing cluster, or leave empty to auto-generate on first run
+kafka_cluster_id: ""
+
+# Built from inventory — do not override unless you know what you are doing
+kafka_controller_quorum_voters: >-
+  {%- set voters = [] -%}
+  {%- for host in groups['kafka_kraft'] | sort -%}
+  {%- set _ = voters.append(hostvars[host]['kafka_broker_id'] | string + '@' + hostvars[host]['ansible_default_ipv4']['address'] + ':' + (kafka_controller_port | string)) -%}
+  {%- endfor -%}
+  {{ voters | join(',') }}

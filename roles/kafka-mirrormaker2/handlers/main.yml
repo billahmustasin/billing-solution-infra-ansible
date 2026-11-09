@@ -1,0 +1,9 @@
+---
+- name: Reload systemd
+  command: systemctl daemon-reload
+  changed_when: false
+
+- name: Restart kafka-mirrormaker2
+  service:
+    name: kafka-mirrormaker2
+    state: restarted

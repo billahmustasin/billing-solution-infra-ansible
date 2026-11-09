@@ -1,0 +1,111 @@
+---
+- name: Install prerequisites
+  package:
+    name:
+      - curl
+      - tar
+    state: present
+
+- name: Create etcd user
+  user:
+    name: etcd
+    system: yes
+    shell: /sbin/nologin
+    create_home: no
+
+- name: Create etcd directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: etcd
+    group: etcd
+    mode: '0755'
+  loop:
+    - /etc/etcd
+    - /var/lib/etcd
+
+- name: Download etcd binary
+  get_url:
+    url: "https://github.com/etcd-io/etcd/releases/download/v3.5.12/etcd-v3.5.12-linux-amd64.tar.gz"
+    dest: /tmp/etcd.tar.gz
+    mode: '0644'
+
+- name: Extract etcd
+  unarchive:
+    src: /tmp/etcd.tar.gz
+    dest: /tmp/
+    remote_src: yes
+
+- name: Install etcd binaries
+  copy:
+    src: "/tmp/etcd-v3.5.12-linux-amd64/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    mode: '0755'
+    remote_src: yes
+  loop:
+    - etcd
+    - etcdctl
+
+- name: Verify etcd installed
+  command: /usr/local/bin/etcd --version
+  register: etcd_ver
+  changed_when: false
+
+- name: Print etcd version
+  debug:
+    msg: "{{ etcd_ver.stdout_lines[0] }}"
+
+- name: Configure etcd
+  template:
+    src: etcd.conf.j2
+    dest: /etc/default/etcd
+    owner: etcd
+    group: etcd
+    mode: '0644'
+  notify: Restart etcd
+
+- name: Create etcd systemd service
+  template:
+    src: etcd.service.j2
+    dest: /etc/systemd/system/etcd.service
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart etcd
+
+- name: Reload systemd
+  command: systemctl daemon-reload
+
+- name: Enable etcd service
+  service:
+    name: etcd
+    enabled: yes
+
+- name: Open etcd client port in firewalld
+  shell: |
+    firewall-cmd --permanent --add-port=2379/tcp
+    firewall-cmd --permanent --add-port=2380/tcp
+    firewall-cmd --reload
+  changed_when: true
+  failed_when: false
+
+# etcd requires a quorum of peers to be reachable before it transitions to
+# "running". With Ansible's default linear strategy, nodes start one at a time
+# and the first node times out waiting for the others. Using async+poll:0 fires
+# the start command on ALL nodes at the same moment, then wait_for confirms
+# each node's client port is listening before moving on.
+- name: Start etcd on all nodes simultaneously (async)
+  service:
+    name: etcd
+    state: started
+  async: 120
+  poll: 0
+  register: etcd_start_job
+
+- name: Wait for etcd client port 2379 to be listening
+  wait_for:
+    host: "{{ ansible_default_ipv4.address }}"
+    port: 2379
+    delay: 5
+    timeout: 120
+    state: started

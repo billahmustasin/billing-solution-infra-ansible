@@ -1,0 +1,19 @@
+# group_vars/kafka_mirrormaker2.yml
+# MirrorMaker 2 — Option C cross-region async replication (Primary ↔ DR)
+#
+# Runs on kafka-a1 (172.17.105.9). One MM2 instance handles both directions.
+#
+# Network requirements on MM2 host and ALL Kafka brokers (both regions):
+# | Port | Direction | Purpose |
+# |------|-----------|---------|
+# | 9092 | MM2 host → all brokers | Replication traffic |
+# | 9092 | Primary brokers ← DR brokers | MM2 remote consume/produce |
+#
+# Target: keep replication lag low; cron alerts when offset lag exceeds threshold.
+
+mm2_primary_bootstrap: "172.17.105.9:9092,172.17.105.10:9092"
+mm2_dr_bootstrap: "172.27.105.9:9092,172.27.105.10:9092"
+
+mm2_replication_factor: 2
+mm2_tasks_max: 4
+mm2_lag_alert_messages: 10000

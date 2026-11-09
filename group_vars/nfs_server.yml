@@ -1,0 +1,24 @@
+# group_vars/nfs_server.yml
+# NFS server — log storage for Loki / Grafana stack
+# Per disaster-recovery-diagram.svg: /exports/logs/ (audit, app, access)
+#
+# Kubernetes PV example (Loki):
+#   nfs:
+#     server: 172.31.25.98
+#     path: /exports/logs/loki
+
+nfs_export_clients: "172.17.0.0/16"
+
+# ── INCOMING TRAFFIC — open on NFS server security group ──
+#
+# | Port    | Protocol | Source              | Purpose                    |
+# |---------|----------|---------------------|----------------------------|
+# | 2049    | TCP/UDP  | K8s worker nodes    | NFSv4 (primary)            |
+# | 111     | TCP/UDP  | K8s worker nodes    | rpcbind (NFSv3 fallback)   |
+# | 20048   | TCP/UDP  | K8s worker nodes    | mountd (NFSv3 fallback)    |
+#
+# Restrict to your VPC CIDR (172.31.0.0/16) — never expose to the internet.
+#
+# Mount on a client (test):
+#   sudo mkdir -p /mnt/logs
+#   sudo mount -t nfs 172.31.25.98:/exports/logs /mnt/logs

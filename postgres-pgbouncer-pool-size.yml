@@ -1,0 +1,22 @@
+---
+# PgBouncer is not used. Do not write /etc/pgbouncer or reload it.
+# Application connections go VIP :5000 → HAProxy → Postgres :5432.
+#
+#   ansible-playbook postgres-pgbouncer-pool-size.yml
+
+- name: Refuse to resize a PgBouncer pool that is not in the path
+  hosts: db_all:db2_all
+  become: yes
+  tasks:
+    - name: Stop and disable PgBouncer
+      service:
+        name: pgbouncer
+        state: stopped
+        enabled: no
+      failed_when: false
+
+    - name: Explain why pool size is not applied
+      debug:
+        msg: >-
+          {{ inventory_hostname }}: skipped PgBouncer pool change.
+          Applications connect through HAProxy to Postgres port 5432.

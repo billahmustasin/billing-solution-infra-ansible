@@ -1,0 +1,9 @@
+---
+- name: Reload NFS exports
+  command: exportfs -ra
+  changed_when: false
+
+- name: Restart nfs-server
+  service:
+    name: nfs-server
+    state: restarted

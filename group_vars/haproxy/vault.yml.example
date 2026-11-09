@@ -1,0 +1,4 @@
+# Copy to vault.yml and fill in real values:
+#   cp group_vars/haproxy/vault.yml.example group_vars/haproxy/vault.yml
+haproxy_vrrp_password: "CHANGE_ME"
+haproxy_stats_password: "CHANGE_ME"

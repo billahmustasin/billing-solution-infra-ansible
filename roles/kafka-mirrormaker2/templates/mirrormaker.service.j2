@@ -1,0 +1,20 @@
+[Unit]
+Description=Apache Kafka MirrorMaker 2 (cross-region)
+Documentation=https://kafka.apache.org/documentation/#georeplication
+After=network-online.target kafka.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ kafka_user }}
+Group={{ kafka_group }}
+Environment="KAFKA_HEAP_OPTS={{ mm2_heap_opts }}"
+Environment="LOG_DIR={{ kafka_log4j_dir }}"
+ExecStart={{ kafka_install_dir }}/bin/connect-mirror-maker.sh {{ mm2_config_file }}
+Restart=on-failure
+RestartSec=15
+LimitNOFILE=100000
+WorkingDirectory={{ kafka_install_dir }}
+
+[Install]
+WantedBy=multi-user.target

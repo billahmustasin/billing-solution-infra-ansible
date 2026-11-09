@@ -1,0 +1,19 @@
+---
+# kafka-mirrormaker2.yml
+# Option C — bidirectional MirrorMaker 2 replication Primary ↔ DR.
+#
+# Prerequisites:
+#   - kafka-kraft.yml completed on both regions
+#   - Network/firewall: MM2 host (kafka-a1) can reach 9092 on all 4 brokers
+#
+#   ansible-playbook kafka-mirrormaker2.yml
+
+- name: Provision MirrorMaker 2 — Primary ↔ DR
+  hosts: kafka_mirrormaker
+  become: yes
+  gather_facts: yes
+  vars_files:
+    - group_vars/kafka_mirrormaker2.yml
+
+  roles:
+    - role: kafka-mirrormaker2

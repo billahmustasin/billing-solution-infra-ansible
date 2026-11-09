@@ -1,0 +1,18 @@
+# group_vars/minio.yml
+# MinIO — Region A (S3-compatible object storage)
+# Per disaster-recovery-diagram.svg:
+#   - Backups, archives, long-term data retention
+#   - Real-time bidirectional replication to Region B (site replication — separate setup)
+#
+# Override minio_root_user / minio_root_password via vault in production.
+
+# ── INCOMING TRAFFIC — open on MinIO security group ──
+#
+# | Port  | Protocol | Source                          | Purpose                        |
+# |-------|----------|---------------------------------|--------------------------------|
+# | 9000  | TCP      | App worker nodes (same region)  | S3 API (apps, pgBackRest, etc.)|
+# | 9000  | TCP      | Region B MinIO node             | Site replication (when enabled)|
+# | 9000  | TCP      | Health-check / monitoring       | /minio/health/live             |
+# | 9001  | TCP      | Admin / ops subnet only         | Web console (restrict access)  |
+#
+# Do NOT expose 9001 to the public internet.

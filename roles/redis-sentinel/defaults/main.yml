@@ -1,0 +1,18 @@
+---
+# RHEL 10+ ships Valkey instead of Redis; older RHEL uses the redis package.
+kv_use_valkey: "{{ ansible_distribution_major_version | int >= 10 }}"
+kv_package: "{{ 'valkey' if kv_use_valkey else 'redis' }}"
+kv_user: "{{ 'valkey' if kv_use_valkey else 'redis' }}"
+kv_group: "{{ 'valkey' if kv_use_valkey else 'redis' }}"
+kv_config_dir: "{{ '/etc/valkey' if kv_use_valkey else '/etc/redis' }}"
+kv_server_conf: "{{ 'valkey.conf' if kv_use_valkey else 'redis.conf' }}"
+kv_server_bin: "{{ '/usr/bin/valkey-server' if kv_use_valkey else '/usr/bin/redis-server' }}"
+kv_check_aof_bin: "{{ '/usr/bin/valkey-check-aof' if kv_use_valkey else '/usr/bin/redis-check-aof' }}"
+kv_check_rdb_bin: "{{ '/usr/bin/valkey-check-rdb' if kv_use_valkey else '/usr/bin/redis-check-rdb' }}"
+kv_cli_bin: "{{ '/usr/bin/valkey-cli' if kv_use_valkey else '/usr/bin/redis-cli' }}"
+kv_sentinel_bin: "{{ '/usr/bin/valkey-sentinel' if kv_use_valkey else '/usr/bin/redis-sentinel' }}"
+kv_service: "{{ 'valkey' if kv_use_valkey else 'redis' }}"
+kv_sentinel_service: "{{ 'valkey-sentinel' if kv_use_valkey else 'redis-sentinel' }}"
+kv_run_dir: "{{ '/var/run/valkey' if kv_use_valkey else '/var/run/redis' }}"
+kv_log_dir: "{{ '/var/log/valkey' if kv_use_valkey else '/var/log/redis' }}"
+kv_data_dir: "{{ '/var/lib/valkey' if kv_use_valkey else '/var/lib/redis' }}"

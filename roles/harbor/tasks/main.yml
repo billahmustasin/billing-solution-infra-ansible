@@ -1,0 +1,200 @@
+# roles/harbor/tasks/main.yml
+---
+- name: Check for base OS DNF repos
+  stat:
+    path: /etc/yum.repos.d/centos-stream-10.repo
+  register: harbor_baseos_repo
+
+- name: Add CentOS Stream 10 base repos (unregistered RHEL fallback)
+  copy:
+    dest: /etc/yum.repos.d/centos-stream-10.repo
+    mode: '0644'
+    content: |
+      [centos-stream-10-baseos]
+      name=CentOS Stream 10 - BaseOS
+      baseurl=https://mirror.stream.centos.org/10-stream/BaseOS/x86_64/os/
+      gpgcheck=1
+      gpgkey=https://www.centos.org/keys/RPM-GPG-KEY-CentOS-Official-SHA256
+      enabled=1
+
+      [centos-stream-10-appstream]
+      name=CentOS Stream 10 - AppStream
+      baseurl=https://mirror.stream.centos.org/10-stream/AppStream/x86_64/os/
+      gpgcheck=1
+      gpgkey=https://www.centos.org/keys/RPM-GPG-KEY-CentOS-Official-SHA256
+      enabled=1
+  when: not harbor_baseos_repo.stat.exists
+
+- name: Install prerequisites
+  dnf:
+    name:
+      - curl
+      - tar
+      - openssl
+      - dnf-plugins-core
+      - iptables-nft
+    state: present
+    update_cache: yes
+
+# RHEL 10 minimal images omit netfilter modules Docker requires (xt_addrtype, etc.)
+- name: Install extra kernel modules (RHEL 10+)
+  dnf:
+    name: kernel-modules-extra
+    state: present
+  register: harbor_kernel_modules_extra
+  when: ansible_distribution_major_version | int >= 10
+
+- name: Persist container kernel modules
+  copy:
+    dest: /etc/modules-load.d/harbor-container.conf
+    content: |
+      {% for module in harbor_kernel_modules %}
+      {{ module }}
+      {% endfor %}
+    mode: '0644'
+
+- name: Load container networking kernel modules
+  command: modprobe {{ item }}
+  loop: "{{ harbor_kernel_modules }}"
+  changed_when: false
+  failed_when: false
+
+- name: Configure sysctl for container bridge networking
+  copy:
+    dest: /etc/sysctl.d/99-harbor-container.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+    mode: '0644'
+  notify: Apply sysctl
+
+- name: Apply sysctl before starting Docker
+  meta: flush_handlers
+
+- name: Warn when reboot may be required
+  debug:
+    msg: >-
+      kernel-modules-extra was just installed. If Docker still fails to start,
+      reboot harbor-a1 once, then re-run: ansible-playbook -i etc-ansible-hosts.txt harbor.yml
+  when:
+    - ansible_distribution_major_version | int >= 10
+    - harbor_kernel_modules_extra is defined
+    - harbor_kernel_modules_extra.changed | default(false)
+
+- name: Add Docker CE repository
+  get_url:
+    url: https://download.docker.com/linux/rhel/docker-ce.repo
+    dest: /etc/yum.repos.d/docker-ce.repo
+    mode: '0644'
+
+- name: Install Docker CE and Compose plugin
+  dnf:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+
+- name: Enable and start Docker
+  block:
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+  rescue:
+    - name: Collect Docker service failure log
+      command: journalctl -u docker -n 40 --no-pager
+      register: docker_start_failure
+      changed_when: false
+    - name: Report Docker service failure
+      fail:
+        msg: |-
+          Docker failed to start on {{ inventory_hostname }}.
+          On RHEL 10 this is often fixed by rebooting after kernel-modules-extra install.
+          {{ docker_start_failure.stdout }}
+
+- name: Create Harbor data volume directory
+  file:
+    path: "{{ harbor_data_volume }}"
+    state: directory
+    mode: '0755'
+
+- name: Download Harbor online installer
+  get_url:
+    url: "{{ harbor_installer_base }}/{{ harbor_installer_archive }}"
+    dest: "/tmp/{{ harbor_installer_archive }}"
+    mode: '0644'
+    timeout: 600
+
+- name: Extract Harbor installer
+  unarchive:
+    src: "/tmp/{{ harbor_installer_archive }}"
+    dest: /opt
+    remote_src: yes
+    creates: "{{ harbor_install_dir }}/install.sh"
+
+- name: Create Harbor TLS directory
+  file:
+    path: "{{ harbor_ssl_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Generate self-signed TLS certificate for Harbor (IP-based)
+  command: >-
+    openssl req -x509 -nodes -days {{ harbor_ssl_days }}
+    -newkey rsa:2048
+    -keyout {{ harbor_ssl_key }}
+    -out {{ harbor_ssl_cert }}
+    -subj "/CN={{ harbor_hostname }}"
+    -addext "subjectAltName=IP:{{ harbor_hostname }}"
+  args:
+    creates: "{{ harbor_ssl_cert }}"
+
+- name: Restrict Harbor TLS private key permissions
+  file:
+    path: "{{ harbor_ssl_key }}"
+    mode: '0600'
+
+- name: Configure Harbor
+  template:
+    src: harbor.yml.j2
+    dest: "{{ harbor_install_dir }}/harbor.yml"
+    mode: '0644'
+
+- name: Check whether Harbor is already installed
+  stat:
+    path: "{{ harbor_data_volume }}/database"
+  register: harbor_data_installed
+
+- name: Install Harbor
+  command: ./install.sh
+  args:
+    chdir: "{{ harbor_install_dir }}"
+  environment:
+    TERM: xterm
+  when: not harbor_data_installed.stat.exists
+  async: 1800
+  poll: 30
+
+- name: Wait for Harbor HTTPS port
+  wait_for:
+    host: 127.0.0.1
+    port: "{{ harbor_https_port }}"
+    delay: 15
+    timeout: 600
+    state: started
+
+- name: Display Harbor access information
+  debug:
+    msg: >-
+      Harbor {{ harbor_version }} is available at https://{{ harbor_hostname }}/
+      Login: admin / (password in group_vars or vault).
+      Self-signed cert — configure container runtimes with insecure-registries
+      or trust {{ harbor_ssl_cert }}.
+      Docker login: docker login {{ harbor_hostname }}

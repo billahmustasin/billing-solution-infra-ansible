@@ -1,0 +1,12 @@
+"postgres" "{{ postgres_password }}"
+"appuser"  "{{ pgbouncer_password }}"
+"{{ app_db_user }}" "{{ app_db_password }}"
+{% if ops_db_user is defined %}
+"{{ ops_db_user }}" "{{ ops_db_password }}"
+{% endif %}
+{% if metrics_exporter_user is defined %}
+"{{ metrics_exporter_user }}" "{{ metrics_exporter_password }}"
+{% endif %}
+{% for role in app_db_service_roles | default([]) %}
+"{{ role }}" "{{ app_db_password }}"
+{% endfor %}

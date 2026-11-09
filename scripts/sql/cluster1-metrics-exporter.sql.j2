@@ -1,0 +1,27 @@
+-- Cluster 1 leader. Read-only metrics login for postgres_exporter / pgbouncer_exporter.
+-- pg_monitor only. Cannot DDL or create databases. Replicates to db-a1b.
+
+DO $$
+BEGIN
+  CREATE ROLE metrics_exporter LOGIN
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+    PASSWORD '{{ metrics_exporter_password | replace("'", "''") }}';
+EXCEPTION
+  WHEN duplicate_object THEN
+    ALTER ROLE metrics_exporter WITH LOGIN
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+      PASSWORD '{{ metrics_exporter_password | replace("'", "''") }}';
+END
+$$;
+
+GRANT pg_monitor TO metrics_exporter;
+GRANT CONNECT ON DATABASE postgres TO metrics_exporter;
+GRANT CONNECT ON DATABASE race_core_service TO metrics_exporter;
+GRANT CONNECT ON DATABASE race_billing TO metrics_exporter;
+GRANT CONNECT ON DATABASE race_partner TO metrics_exporter;
+REVOKE CREATE ON DATABASE postgres FROM metrics_exporter;
+REVOKE CREATE ON DATABASE race_core_service FROM metrics_exporter;
+REVOKE CREATE ON DATABASE race_billing FROM metrics_exporter;
+REVOKE CREATE ON DATABASE race_partner FROM metrics_exporter;
+
+SELECT rolname, rolsuper, rolcreatedb FROM pg_roles WHERE rolname = 'metrics_exporter';

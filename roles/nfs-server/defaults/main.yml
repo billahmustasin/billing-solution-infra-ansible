@@ -1,0 +1,17 @@
+---
+nfs_export_path: /exports/logs
+nfs_export_clients: "172.31.0.0/16"
+
+# Subdirectories per disaster-recovery-diagram.svg + Loki volume
+nfs_log_subdirs:
+  - audit
+  - app
+  - access
+  - loki
+
+# Loki Helm chart commonly runs as UID/GID 10001
+nfs_loki_uid: 10001
+nfs_loki_gid: 10001
+
+# NFSv4 is default on RHEL 10; fsid=0 roots the pseudo-filesystem at this export
+nfs_export_options: "rw,sync,no_subtree_check,no_root_squash,fsid=0"

@@ -1,0 +1,20 @@
+# Local secrets (tfvars equivalent) — never commit
+**/vault.yml
+**/*_vault.yml
+**/secrets.yml
+**/secrets.yaml
+
+# ansible-vault password files
+.vault_pass
+*.vault_pass
+.vault-password
+vault_pass.txt
+
+# Local env overrides
+.env
+.env.*
+!.env.example
+
+# Ansible runtime
+*.retry
+.ansible/

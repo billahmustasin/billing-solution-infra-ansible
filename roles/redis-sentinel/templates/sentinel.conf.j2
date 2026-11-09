@@ -1,0 +1,30 @@
+# {{ kv_config_dir }}/sentinel.conf — managed by Ansible
+# {{ ansible_managed }}
+
+bind {{ sentinel_bind_address }}
+port {{ sentinel_port }}
+protected-mode no
+daemonize no
+supervised systemd
+pidfile {{ kv_run_dir }}/sentinel.pid
+logfile {{ kv_log_dir }}/sentinel.log
+dir {{ kv_data_dir }}
+
+# Sentinel monitor — always point at the intended master
+# Sentinel will resolve the current master automatically on failover
+sentinel monitor {{ sentinel_cluster_name }} {{ sentinel_master_ip }} {{ sentinel_master_port }} {{ sentinel_quorum }}
+
+# Auth for monitored primary (requirepass on server — auth-pass only)
+sentinel auth-pass {{ sentinel_cluster_name }} {{ redis_require_password }}
+
+# Failover timeouts
+sentinel down-after-milliseconds {{ sentinel_cluster_name }} {{ sentinel_down_after_ms | default(30000) }}
+sentinel failover-timeout {{ sentinel_cluster_name }} {{ sentinel_failover_timeout_ms | default(180000) }}
+sentinel parallel-syncs {{ sentinel_cluster_name }} {{ sentinel_parallel_syncs | default(1) }}
+
+# Deny reconfig attempts via SENTINEL SET (force via sentinelctl only)
+sentinel deny-scripts-reconfig yes
+
+# Announce this node's address so other Sentinels can reach it (required on cloud VPCs)
+sentinel announce-ip {{ ansible_default_ipv4.address }}
+sentinel announce-port {{ sentinel_port }}

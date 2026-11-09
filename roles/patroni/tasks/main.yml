@@ -1,0 +1,82 @@
+# roles/patroni/tasks/main.yml
+---
+# python3-virtualenv and Ansible pip module are not reliable on RHEL 10.
+# Use command module to call python/pip directly instead.
+- name: Install pip3 and build dependencies (RHEL 10)
+  dnf:
+    name:
+      - python3-pip
+      - python3-devel
+      - python3
+      - gcc
+    state: present
+    update_cache: yes
+
+- name: Create Patroni virtualenv
+  command: python3 -m venv /opt/patroni
+  args:
+    creates: /opt/patroni/bin/python3
+
+- name: Upgrade pip inside the virtualenv
+  command: /opt/patroni/bin/pip install --upgrade pip
+  changed_when: false
+
+- name: Install Patroni and dependencies into virtualenv
+  command: /opt/patroni/bin/pip install --upgrade "patroni[etcd3]" psycopg2-binary
+  args:
+    creates: /opt/patroni/bin/patroni
+
+- name: Create Patroni config directory
+  file:
+    path: /etc/patroni
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0755'
+
+- name: Write Patroni config
+  template:
+    src: patroni.yml.j2
+    dest: /etc/patroni/patroni.yml
+    owner: postgres
+    group: postgres
+    mode: '0600'
+  notify: Restart Patroni
+
+- name: Create Patroni systemd service
+  template:
+    src: patroni.service.j2
+    dest: /etc/systemd/system/patroni.service
+  notify:
+    - Reload systemd
+    - Restart Patroni
+
+- name: Start and enable Patroni
+  service:
+    name: patroni
+    state: started
+    enabled: yes
+
+# Patroni's bootstrap.users runs only once on first init.
+# If the data dir already existed from a prior run, the replicator role
+# may have been skipped. Ensure it exists on the primary node.
+- name: Wait for Patroni primary to be ready
+  command: >
+    /opt/patroni/bin/patronictl -c /etc/patroni/patroni.yml list
+  register: patroni_list
+  until: "'Leader' in patroni_list.stdout and 'running' in patroni_list.stdout"
+  retries: 12
+  delay: 10
+  changed_when: false
+  run_once: true
+
+- name: Ensure replicator role exists on the primary
+  shell: |
+    psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='replicator'" | grep -q 1 \
+      || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD '{{ replication_password }}'"
+  become: true
+  become_user: postgres
+  run_once: true
+  changed_when: false
+  when: "'Leader' in patroni_list.stdout"
+

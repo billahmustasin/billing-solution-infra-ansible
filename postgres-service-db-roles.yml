@@ -1,0 +1,53 @@
+---
+# postgres-service-db-roles.yml
+# Phase 1: per-service Postgres roles.
+# No Postgres restart. Does not start PgBouncer.
+# Applications reach Postgres through HAProxy on port 5000.
+#
+# Run from Jenkins:
+#   ansible-playbook postgres-service-db-roles.yml
+#
+# Then point apps at the new usernames:
+#   bash scripts/k8s-set-service-db-users.sh
+
+- name: Create Cluster 1 per-service roles (leader only)
+  hosts: db_primary
+  become: yes
+  tasks:
+    - name: Render Cluster 1 role SQL
+      template:
+        src: "{{ playbook_dir }}/scripts/sql/cluster1-service-roles.sql.j2"
+        dest: /tmp/cluster1-service-roles.sql
+        owner: postgres
+        group: postgres
+        mode: "0600"
+
+    - name: Apply Cluster 1 service roles
+      command: psql -v ON_ERROR_STOP=1 -f /tmp/cluster1-service-roles.sql
+      become_user: postgres
+      register: c1_roles
+
+    - name: Show Cluster 1 roles
+      debug:
+        msg: "{{ c1_roles.stdout_lines[-20:] }}"
+
+- name: Create Cluster 2 per-service roles (leader only)
+  hosts: db2_primary
+  become: yes
+  tasks:
+    - name: Render Cluster 2 role SQL
+      template:
+        src: "{{ playbook_dir }}/scripts/sql/cluster2-service-roles.sql.j2"
+        dest: /tmp/cluster2-service-roles.sql
+        owner: postgres
+        group: postgres
+        mode: "0600"
+
+    - name: Apply Cluster 2 service roles
+      command: psql -v ON_ERROR_STOP=1 -f /tmp/cluster2-service-roles.sql
+      become_user: postgres
+      register: c2_roles
+
+    - name: Show Cluster 2 roles
+      debug:
+        msg: "{{ c2_roles.stdout_lines[-20:] }}"

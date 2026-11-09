@@ -1,0 +1,10 @@
+# roles/pgbackrest/templates/pgbackrest.conf.j2
+[main]
+pg1-path={{ pg_data_dir }}
+
+[global]
+repo1-path={{ pgbackrest_repo_path }}
+repo1-retention-full=2
+log-level-console=info
+log-level-file=detail
+start-fast=y

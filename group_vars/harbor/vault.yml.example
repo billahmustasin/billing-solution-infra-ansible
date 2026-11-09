@@ -1,0 +1,4 @@
+# Copy to vault.yml and fill in real values:
+#   cp group_vars/harbor/vault.yml.example group_vars/harbor/vault.yml
+harbor_admin_password: "CHANGE_ME"
+harbor_db_password: "CHANGE_ME"

@@ -1,0 +1,17 @@
+[Unit]
+Description=Prometheus {{ item.name }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=prometheus
+Group=prometheus
+EnvironmentFile=-/etc/default/{{ item.name }}
+ExecStart={{ item.exec }}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

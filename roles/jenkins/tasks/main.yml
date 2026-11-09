@@ -1,0 +1,242 @@
+# roles/jenkins/tasks/main.yml
+---
+- name: Install Java and prerequisites
+  dnf:
+    name:
+      - "{{ jenkins_java_package }}"
+      - fontconfig
+      - dejavu-sans-fonts
+      - curl
+      - openssl
+    state: present
+    update_cache: yes
+
+- name: Add Jenkins LTS RPM repository
+  get_url:
+    url: "{{ jenkins_repo_url }}"
+    dest: /etc/yum.repos.d/jenkins.repo
+    mode: '0644'
+
+- name: Download Jenkins repository GPG key (2026)
+  get_url:
+    url: "{{ jenkins_gpg_key_url }}"
+    dest: /etc/pki/rpm-gpg/RPM-GPG-KEY-jenkins-2026
+    mode: '0644'
+
+- name: Import Jenkins repository GPG key (2026) via rpm
+  # rpm_key/gpg fail on the 2026 OpenPGP v6 key; Jenkins docs use rpm --import
+  command: rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-jenkins-2026
+  register: jenkins_gpg_import
+  changed_when: jenkins_gpg_import.rc == 0
+  failed_when: >
+    jenkins_gpg_import.rc != 0 and
+    ('already imported' not in (jenkins_gpg_import.stderr | default('') | lower)) and
+    ('identical' not in (jenkins_gpg_import.stderr | default('') | lower))
+
+- name: Install Jenkins LTS {{ jenkins_version }}
+  dnf:
+    name: "{{ jenkins_package }}"
+    state: present
+    update_cache: yes
+
+- name: Bind Jenkins to localhost only
+  lineinfile:
+    path: /etc/sysconfig/jenkins
+    regexp: '^JENKINS_PORT='
+    line: 'JENKINS_PORT="{{ jenkins_http_port }}"'
+    create: yes
+    mode: '0644'
+
+- name: Set Jenkins listen address to localhost
+  lineinfile:
+    path: /etc/sysconfig/jenkins
+    regexp: '^JENKINS_LISTEN_ADDRESS='
+    line: 'JENKINS_LISTEN_ADDRESS="{{ jenkins_listen_address }}"'
+    create: yes
+    mode: '0644'
+  notify: Restart jenkins
+
+- name: Ensure Jenkins init.groovy.d directory exists
+  file:
+    path: "{{ jenkins_home }}/init.groovy.d"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: '0755'
+
+- name: Deploy Jenkins init script for HTTPS root URL
+  template:
+    src: jenkins-url.groovy.j2
+    dest: "{{ jenkins_home }}/init.groovy.d/10-https-url.groovy"
+    owner: jenkins
+    group: jenkins
+    mode: '0644'
+  notify: Restart jenkins
+
+- name: Install nginx reverse proxy
+  dnf:
+    name: nginx
+    state: present
+
+- name: Create TLS directory for Jenkins
+  file:
+    path: "{{ jenkins_ssl_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Stat existing TLS certificate
+  stat:
+    path: "{{ jenkins_ssl_cert }}"
+  register: jenkins_ssl_cert_stat
+
+- name: Read existing TLS certificate SAN
+  command: openssl x509 -in {{ jenkins_ssl_cert }} -noout -ext subjectAltName
+  register: jenkins_ssl_existing_san
+  changed_when: false
+  failed_when: false
+  when: jenkins_ssl_cert_stat.stat.exists
+
+- name: Remove TLS certificate when SAN IPs changed
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ jenkins_ssl_cert }}"
+    - "{{ jenkins_ssl_key }}"
+  when:
+    - jenkins_ssl_cert_stat.stat.exists
+    - jenkins_ssl_san_ips | reject('in', jenkins_ssl_existing_san.stdout | default('')) | list | length > 0
+
+- name: Generate self-signed TLS certificate (private + public IP SAN)
+  command: >-
+    openssl req -x509 -nodes -days {{ jenkins_ssl_days }}
+    -newkey rsa:2048
+    -keyout {{ jenkins_ssl_key }}
+    -out {{ jenkins_ssl_cert }}
+    -subj "/CN={{ jenkins_ssl_cn }}"
+    -addext "subjectAltName=IP:{{ jenkins_ssl_san_ips | join(',IP:') }}"
+  args:
+    creates: "{{ jenkins_ssl_cert }}"
+  notify: Reload nginx
+
+- name: Restrict TLS private key permissions
+  file:
+    path: "{{ jenkins_ssl_key }}"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Configure nginx as Jenkins HTTPS reverse proxy
+  template:
+    src: nginx-jenkins.conf.j2
+    dest: /etc/nginx/conf.d/jenkins.conf
+    mode: '0644'
+  notify: Reload nginx
+
+- name: Remove default nginx welcome site
+  file:
+    path: /etc/nginx/conf.d/default.conf
+    state: absent
+  notify: Reload nginx
+
+- name: Check httpd_can_network_connect SELinux boolean
+  command: getsebool httpd_can_network_connect
+  register: jenkins_sebool_httpd_check
+  changed_when: false
+  when: ansible_selinux.status == 'enabled'
+
+- name: Allow nginx to connect to Jenkins backend
+  command: setsebool -P httpd_can_network_connect on
+  when:
+    - ansible_selinux.status == 'enabled'
+    - jenkins_sebool_httpd_check.stdout is defined
+    - "'httpd_can_network_connect --> on' not in jenkins_sebool_httpd_check.stdout"
+
+- name: Open HTTPS port in firewalld
+  shell: |
+    firewall-cmd --permanent --add-port={{ jenkins_https_port }}/tcp
+    firewall-cmd --reload
+  changed_when: true
+  failed_when: false
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - ansible_facts.services['firewalld.service'].state == 'running'
+
+- name: Check firewalld ports for Jenkins HTTP exposure
+  command: firewall-cmd --list-ports
+  register: jenkins_fw_ports
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - ansible_facts.services['firewalld.service'].state == 'running'
+
+- name: Close Jenkins HTTP port in firewalld (localhost-only backend)
+  shell: |
+    firewall-cmd --permanent --remove-port={{ jenkins_http_port }}/tcp
+    firewall-cmd --reload
+  when:
+    - jenkins_fw_ports.stdout is defined
+    - (jenkins_http_port | string) + '/tcp' in jenkins_fw_ports.stdout
+  changed_when: true
+  failed_when: false
+
+- name: Enable and start Jenkins
+  service:
+    name: jenkins
+    state: started
+    enabled: yes
+
+- name: Enable and start nginx
+  service:
+    name: nginx
+    state: started
+    enabled: yes
+
+- name: Apply handler changes before health checks
+  meta: flush_handlers
+
+- name: Wait for Jenkins on localhost
+  wait_for:
+    host: "{{ jenkins_listen_address }}"
+    port: "{{ jenkins_http_port }}"
+    delay: 10
+    timeout: 300
+    state: started
+
+- name: Wait for nginx HTTPS port
+  wait_for:
+    host: 127.0.0.1
+    port: "{{ jenkins_https_port }}"
+    delay: 5
+    timeout: 60
+    state: started
+
+- name: Check for Jenkins initial admin password file
+  stat:
+    path: "{{ jenkins_home }}/secrets/initialAdminPassword"
+  register: jenkins_initial_password_file
+
+- name: Read Jenkins initial admin password
+  slurp:
+    src: "{{ jenkins_home }}/secrets/initialAdminPassword"
+  register: jenkins_initial_password
+  when: jenkins_initial_password_file.stat.exists
+
+- name: Display Jenkins initial admin password (first install only)
+  debug:
+    msg: >-
+      Jenkins {{ jenkins_version }} is available at {{ jenkins_public_url }}
+      (self-signed cert — browser will warn until you add a domain).
+      Port {{ jenkins_http_port }} is localhost-only; open {{ jenkins_https_port }} in the security group.
+      Initial admin password: {{ jenkins_initial_password.content | b64decode | trim }}
+  when: jenkins_initial_password_file.stat.exists
+
+- name: Display Jenkins URL when already configured
+  debug:
+    msg: >-
+      Jenkins {{ jenkins_version }} is available at {{ jenkins_public_url }}
+      (self-signed cert). Port {{ jenkins_http_port }} is localhost-only.
+  when: not jenkins_initial_password_file.stat.exists

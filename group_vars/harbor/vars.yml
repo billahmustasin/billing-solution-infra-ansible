@@ -1,0 +1,20 @@
+# group_vars/harbor/vars.yml — Harbor container registry (non-secret)
+# Harbor container registry — Region A
+# Version: 2.14.4 (online installer + Docker Compose)
+#
+# No domain yet — HTTPS with self-signed cert (IP: 172.31.19.189)
+# Default user: admin
+#
+# ── INCOMING TRAFFIC — open on Harbor security group ──
+#
+# | Port | Protocol | Source              | Purpose                              |
+# |------|----------|---------------------|--------------------------------------|
+# | 443  | TCP      | K8s worker nodes    | docker push/pull, helm OCI, UI       |
+# | 443  | TCP      | Jenkins / CI subnet | Build pipelines push images          |
+# | 443  | TCP      | DevOps / VPN        | Harbor web UI                        |
+#
+# Do NOT open port 80 unless you enable HTTP in harbor.yml.
+#
+# Self-signed cert — on each docker host until you have a domain:
+#   /etc/docker/daemon.json → "insecure-registries": ["172.31.19.189"]
+# Or copy harbor.crt to /etc/docker/certs.d/172.31.19.189/ca.crt

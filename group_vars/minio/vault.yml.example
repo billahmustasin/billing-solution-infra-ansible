@@ -1,0 +1,4 @@
+# Copy to vault.yml and fill in real values:
+#   cp group_vars/minio/vault.yml.example group_vars/minio/vault.yml
+minio_root_user: minioadmin
+minio_root_password: "CHANGE_ME"

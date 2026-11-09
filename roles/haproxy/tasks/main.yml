@@ -1,0 +1,126 @@
+# roles/haproxy/tasks/main.yml
+---
+- name: Install HAProxy
+  dnf:
+    name: haproxy
+    state: present
+    update_cache: yes
+
+- name: Install keepalived
+  dnf:
+    name: keepalived
+    state: present
+
+# Install policycoreutils-python-utils for semanage (SELinux port labeling)
+- name: Install SELinux management tools
+  dnf:
+    name: policycoreutils-python-utils
+    state: present
+
+# SELinux on RHEL 10 blocks HAProxy from binding to non-standard ports.
+# Label each port as haproxy_port_t so the policy allows binding.
+- name: Allow HAProxy to bind to primary port (SELinux)
+  command: semanage port -a -t haproxy_port_t -p tcp {{ haproxy_primary_port }}
+  changed_when: false
+  failed_when: false
+
+- name: Allow HAProxy to bind to replica port (SELinux)
+  command: semanage port -a -t haproxy_port_t -p tcp {{ haproxy_replica_port }}
+  changed_when: false
+  failed_when: false
+
+- name: Allow HAProxy to bind to stats port (SELinux)
+  command: semanage port -a -t haproxy_port_t -p tcp {{ haproxy_stats_port }}
+  changed_when: false
+  failed_when: false
+
+# SELinux on RHEL 10 blocks haproxy_t from creating its admin socket.
+# Setting haproxy_t to permissive mode is the most reliable fix on RHEL 10
+# where the haproxy policy is incomplete.
+- name: Set haproxy SELinux domain to permissive (RHEL 10)
+  command: semanage permissive -a haproxy_t
+  changed_when: false
+  failed_when: false
+
+# /run/haproxy must exist before HAProxy starts (for admin.sock)
+- name: Create HAProxy runtime directory
+  file:
+    path: /run/haproxy
+    state: directory
+    owner: haproxy
+    group: haproxy
+    mode: '0755'
+
+- name: Set SELinux file context for /run/haproxy
+  command: semanage fcontext -a -t haproxy_var_run_t "/run/haproxy(/.*)?"
+  changed_when: false
+  failed_when: false
+
+- name: Apply SELinux context to /run/haproxy
+  command: restorecon -Rv /run/haproxy
+  changed_when: false
+
+- name: Persist HAProxy runtime directory across reboots (tmpfiles.d)
+  copy:
+    dest: /etc/tmpfiles.d/haproxy.conf
+    content: "d /run/haproxy 0755 haproxy haproxy -\n"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Deploy HAProxy configuration
+  template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload HAProxy
+  # validate removed — haproxy -c fails before /run/haproxy dir exists
+
+- name: Deploy keepalived configuration
+  template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart keepalived
+
+- name: Enable IP non-local bind for keepalived VIP
+  copy:
+    dest: /etc/sysctl.d/99-haproxy-keepalived.conf
+    content: |
+      net.ipv4.ip_nonlocal_bind = 1
+    mode: '0644'
+
+- name: Apply keepalived sysctl settings
+  command: sysctl --system
+  changed_when: false
+
+# Without vrrp both keepalived peers go MASTER and the VIP is on two nodes.
+# Rules are added permanent + runtime instead of --reload, which would drop runtime-only rules.
+- name: Open HAProxy and Keepalived ports in firewalld
+  shell: |
+    for opt in --add-port={{ haproxy_primary_port }}/tcp \
+               --add-port={{ haproxy_replica_port }}/tcp \
+               --add-port={{ haproxy_stats_port }}/tcp \
+               --add-protocol=vrrp; do
+      firewall-cmd --permanent $opt
+      firewall-cmd $opt
+    done
+  changed_when: true
+  failed_when: false
+  tags: firewall
+
+- name: Start and enable HAProxy
+  service:
+    name: haproxy
+    state: started
+    enabled: yes
+
+- name: Start and enable keepalived
+  service:
+    name: keepalived
+    state: started
+    enabled: yes

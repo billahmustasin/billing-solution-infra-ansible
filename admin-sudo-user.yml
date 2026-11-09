@@ -1,0 +1,50 @@
+---
+# admin-sudo-user.yml
+# Create sudo login admindeveloper on all Region A hosts except K8s nodes,
+# etcd-witness and Jenkins (DB x4, Redis x2, Kafka x2, MinIO, NFS, Harbor).
+#
+# Pass a SHA-512 crypt hash, never the plaintext:
+#   HASH=$(openssl passwd -6 'the-password')
+#   ansible-playbook admin-sudo-user.yml -e "admin_user_password_hash=$HASH"
+# Other hosts (e.g. etcd-witness): add -e target_hosts=etcd-witness
+
+- name: Create admindeveloper sudo user
+  hosts: "{{ target_hosts | default('all:!k8s:!etcd_witness:!jenkins') }}"
+  become: yes
+  vars:
+    admin_user_name: admindeveloper
+  tasks:
+    - name: Require password hash
+      assert:
+        that:
+          - admin_user_password_hash is defined
+          - admin_user_password_hash is match('^\$6\$')
+        fail_msg: "Pass -e admin_user_password_hash=<openssl passwd -6 output>"
+        quiet: true
+
+    - name: Create user
+      user:
+        name: "{{ admin_user_name }}"
+        password: "{{ admin_user_password_hash }}"
+        shell: /bin/bash
+        create_home: yes
+        state: present
+
+    - name: Grant sudo
+      copy:
+        dest: "/etc/sudoers.d/{{ admin_user_name }}"
+        content: "{{ admin_user_name }} ALL=(ALL) ALL\n"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+
+    - name: Check sshd allows password login for the user
+      shell: sshd -T -C user={{ admin_user_name }},host=localhost,addr=127.0.0.1 | grep -Ei '^(passwordauthentication|allowusers|allowgroups) '
+      register: sshd_auth
+      changed_when: false
+      failed_when: false
+
+    - name: Show sshd auth settings
+      debug:
+        msg: "{{ sshd_auth.stdout_lines }}"

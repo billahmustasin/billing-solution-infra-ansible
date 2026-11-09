@@ -1,0 +1,15 @@
+---
+# redis-sentinel.yml
+# Provisions Redis Sentinel cluster for Region A
+# Nodes: redis-a1 (master), redis-a2 (slave), etcd-witness (sentinel-only)
+# All 3 run redis-sentinel; master + slave also run redis-server.
+# Quorum = 2 — survives any single node failure.
+
+- name: Provision Redis Sentinel — Region A
+  hosts: redis_sentinel
+  become: yes
+  gather_facts: yes
+  # Secrets: group_vars/redis_sentinel/vault.yml (gitignored)
+
+  roles:
+    - role: redis-sentinel

@@ -1,0 +1,28 @@
+# group_vars/redis_sentinel/vars.yml — Redis Sentinel Region A (non-secret)
+# 3 sentinels: redis-a1 (master), redis-a2 (slave), etcd-witness (sentinel-only)
+
+redis_bind_address: 0.0.0.0
+redis_port: 6379
+
+sentinel_port: 26379
+sentinel_bind_address: 0.0.0.0
+
+sentinel_cluster_name: myrace-region-a
+sentinel_master_ip: "{{ hostvars['redis-a1']['ansible_default_ipv4']['address'] }}"
+sentinel_master_port: 6379
+sentinel_quorum: 2
+
+redis_slave_ip: "{{ hostvars['redis-a2']['ansible_default_ipv4']['address'] }}"
+redis_slave_port: 6379
+
+# Sentinel-only node (no redis-server, only redis-sentinel)
+sentinel_only_ip: "{{ hostvars['etcd-witness']['ansible_default_ipv4']['address'] }}"
+sentinel_only_port: 26379
+
+redis_require_username: "default"
+
+sentinel_down_after_ms: 30000
+sentinel_failover_timeout_ms: 180000
+sentinel_parallel_syncs: 1
+
+redis_maxmemory: 256mb

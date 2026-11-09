@@ -1,0 +1,24 @@
+[Unit]
+Description=Redis Sentinel
+Documentation=https://redis.io/documentation
+After=network.target {{ kv_service }}.service
+
+[Service]
+Type=notify
+User={{ kv_user }}
+Group={{ kv_group }}
+ExecStart={{ kv_sentinel_bin }} {{ kv_config_dir }}/sentinel.conf --daemonize no --supervised systemd
+ExecStop={{ kv_cli_bin }} -p {{ sentinel_port }} shutdown
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory={{ kv_user }}
+RuntimeDirectoryMode=0755
+LimitNOFILE=10032
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths={{ kv_log_dir }} {{ kv_run_dir }}
+
+[Install]
+WantedBy=multi-user.target

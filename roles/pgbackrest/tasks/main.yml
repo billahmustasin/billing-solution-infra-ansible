@@ -1,0 +1,84 @@
+# roles/pgbackrest/tasks/main.yml
+---
+# pgBackRest from PGDG depends on libssh2 which is not in RHEL 10 base repos.
+# EPEL 10 provides libssh2.
+- name: Install EPEL repository (provides libssh2 for pgBackRest)
+  dnf:
+    name: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm"
+    state: present
+    disable_gpg_check: yes
+
+- name: Install libssh2 from EPEL (required by pgBackRest PGDG package)
+  dnf:
+    name: libssh2
+    state: present
+    enablerepo: epel
+
+- name: Install pgBackRest
+  dnf:
+    name: pgbackrest
+    state: present
+
+- name: Create pgBackRest config directory
+  file:
+    path: /etc/pgbackrest
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0750'
+
+- name: Create backup directory
+  file:
+    path: "{{ pgbackrest_repo_path }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0750'
+
+- name: Configure pgBackRest
+  template:
+    src: pgbackrest.conf.j2
+    dest: /etc/pgbackrest/pgbackrest.conf
+    owner: postgres
+    mode: '0640'
+
+- name: Wait for Patroni primary to be ready
+  wait_for:
+    host: "127.0.0.1"
+    port: 5432
+    delay: 5
+    timeout: 120
+    state: started
+  ignore_errors: yes
+  register: pg_wait_result
+
+- name: Check if this node is the Patroni primary
+  shell: su -s /bin/bash postgres -c "psql -tAc 'SELECT pg_is_in_recovery()'"
+  register: pg_recovery_status
+  changed_when: false
+  failed_when: false
+  when: pg_wait_result is succeeded
+
+- name: Create initial backup stanza (primary only)
+  shell: su -s /bin/bash postgres -c "pgbackrest --stanza=main stanza-create"
+  args:
+    creates: "{{ pgbackrest_repo_path }}/backup/main"
+  when: pg_wait_result is succeeded and pg_recovery_status.stdout | trim == 'f'
+
+- name: Schedule full backup (weekly via cron)
+  cron:
+    name: pgbackrest full backup
+    user: postgres
+    weekday: "0"
+    hour: "2"
+    minute: "0"
+    job: "pgbackrest --stanza=main --type=full backup"
+
+- name: Schedule incremental backup (daily via cron)
+  cron:
+    name: pgbackrest incremental backup
+    user: postgres
+    hour: "2"
+    minute: "0"
+    weekday: "1-6"
+    job: "pgbackrest --stanza=main --type=incr backup"

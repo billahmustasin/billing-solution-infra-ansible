@@ -1,0 +1,13 @@
+---
+# harbor.yml
+# Provisions Harbor container registry on RHEL 10 (Docker Compose)
+# HTTPS on 443 with self-signed cert — no domain required yet
+
+- name: Provision Harbor — Region A
+  hosts: harbor
+  become: yes
+  gather_facts: yes
+  # Secrets: group_vars/harbor/vault.yml (gitignored)
+
+  roles:
+    - role: harbor

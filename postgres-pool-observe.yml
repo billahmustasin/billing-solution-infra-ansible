@@ -1,0 +1,145 @@
+---
+# postgres-pool-observe.yml
+# Phase 0: read-only pool/backend snapshots on Region A Cluster 1 + Cluster 2.
+#
+# Does not restart Postgres. Does not start or reload PgBouncer.
+# Pool snapshots come from pg_stat_activity on local Postgres.
+#
+# Run from Jenkins:
+#   ansible-playbook postgres-pool-observe.yml
+#
+# Snapshots:
+#   /var/log/pg-pool-observe/YYYY-MM-DD.jsonl   (on each DB node, every 5 minutes)
+#   /home/devopsadmin/pg-pool-observe/          (fetched copy on Jenkins)
+
+- name: Phase 0 — observe Postgres pools
+  hosts: db_all:db2_all
+  become: yes
+  vars:
+    observe_dir: /var/log/pg-pool-observe
+    observe_script: /usr/local/sbin/capture-db-pool-stats.sh
+  tasks:
+    - name: Install pool capture script
+      copy:
+        src: scripts/capture-db-pool-stats.sh
+        dest: "{{ observe_script }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Store observe settings for the capture timer
+      copy:
+        dest: /etc/pg-pool-observe.env
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          PG_POOL_OBSERVE_DIR={{ observe_dir }}
+          OBSERVE_HOSTNAME={{ inventory_hostname }}
+
+    - name: Create snapshot directory
+      file:
+        path: "{{ observe_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Install logrotate for pool snapshots
+      copy:
+        dest: /etc/logrotate.d/pg-pool-observe
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          {{ observe_dir }}/*.jsonl {
+              daily
+              rotate 7
+              compress
+              missingok
+              notifempty
+              copytruncate
+          }
+
+    - name: Install pool capture systemd service
+      copy:
+        dest: /etc/systemd/system/pg-pool-observe.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Capture Postgres pool stats
+          After=postgresql.service
+
+          [Service]
+          Type=oneshot
+          EnvironmentFile=-/etc/pg-pool-observe.env
+          ExecStart={{ observe_script }}
+
+    - name: Install pool capture systemd timer (every 5 minutes)
+      copy:
+        dest: /etc/systemd/system/pg-pool-observe.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Capture Postgres pool stats every 5 minutes
+
+          [Timer]
+          OnBootSec=1min
+          OnUnitActiveSec=5min
+          AccuracySec=30s
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      register: observe_timer_unit
+
+    - name: Enable 5-minute pool capture timer
+      systemd:
+        name: pg-pool-observe.timer
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Take a snapshot now
+      shell: "{{ observe_script }}"
+      environment:
+        PG_POOL_OBSERVE_DIR: "{{ observe_dir }}"
+      register: snapshot
+      changed_when: false
+
+    - name: Show snapshot
+      debug:
+        msg: "{{ snapshot.stdout }}"
+
+    - name: Find newest snapshot file
+      shell: ls -1t {{ observe_dir }}/*.jsonl 2>/dev/null | head -1
+      register: newest_snapshot
+      changed_when: false
+
+    - name: Fetch latest jsonl to Jenkins
+      fetch:
+        src: "{{ newest_snapshot.stdout }}"
+        dest: /home/devopsadmin/pg-pool-observe/
+        flat: false
+      when: newest_snapshot.stdout | length > 0
+
+- name: Record application replica counts
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+    - name: List production deployments
+      shell: |
+        sudo -u jenkins kubectl get deploy -n myrace-production \
+          -o custom-columns=NAME:.metadata.name,DESIRED:.spec.replicas,READY:.status.readyReplicas --no-headers
+      register: k8s_deploys
+      changed_when: false
+      failed_when: false
+
+    - name: Show replica counts
+      debug:
+        var: k8s_deploys.stdout_lines

@@ -1,0 +1,245 @@
+---
+# postgres-patroni-haproxy-tune.yml
+# Region A only. Do not run against DR.
+#
+# HAProxy: template + reload (no Keepalived).
+# Patroni: DCS edit-config, then rolling `systemctl restart patroni`
+# (replicas first, then primaries). That restarts Postgres too and is
+# what actually writes DCS GUCs into postgresql.conf.
+#
+#   ansible-playbook postgres-patroni-haproxy-tune.yml --tags patroni
+
+- name: Reload HAProxy config (Region A, both clusters)
+  hosts: db_all:db2_all
+  become: yes
+  serial: 1
+  tags: [haproxy]
+  tasks:
+    - name: Deploy HAProxy configuration
+      template:
+        src: roles/haproxy/templates/haproxy.cfg.j2
+        dest: /etc/haproxy/haproxy.cfg
+        owner: root
+        group: root
+        mode: '0644'
+      register: haproxy_cfg
+
+    - name: Validate HAProxy configuration
+      command: haproxy -c -f /etc/haproxy/haproxy.cfg
+      changed_when: false
+
+    - name: Reload HAProxy (no Keepalived)
+      service:
+        name: haproxy
+        state: reloaded
+      when: haproxy_cfg.changed
+
+- name: Put memory and pg_stat_statements into Patroni DCS
+  hosts: db_primary:db2_primary
+  become: yes
+  serial: 1
+  tags: [patroni]
+  tasks:
+    - name: Apply postgresql.parameters in DCS
+      command: >
+        /opt/patroni/bin/patronictl -c /etc/patroni/patroni.yml
+        edit-config --force
+        -p max_connections=500
+        -p shared_buffers=2GB
+        -p effective_cache_size=8GB
+        -p work_mem=4MB
+        -p maintenance_work_mem=512MB
+        -p wal_buffers=16MB
+        -p random_page_cost=1.1
+        -p effective_io_concurrency=200
+        -p default_statistics_target=100
+        -p max_wal_size=4GB
+        -p min_wal_size=1GB
+        -p checkpoint_completion_target=0.9
+        -p shared_preload_libraries=pg_stat_statements
+        -p pg_stat_statements.max=10000
+        -p pg_stat_statements.track=all
+        -p track_io_timing=on
+      become_user: postgres
+
+- name: Rolling Patroni restart on replicas
+  hosts: db_standby:db2_standby
+  become: yes
+  serial: 1
+  tags: [patroni]
+  tasks:
+    - name: Set postgresql.use_unix_socket
+      lineinfile:
+        path: /etc/patroni/patroni.yml
+        regexp: '^  use_unix_socket:'
+        insertafter: '^  data_dir:'
+        line: '  use_unix_socket: true'
+
+    - name: Read live shared_buffers
+      command: psql -Atqc "SHOW shared_buffers;"
+      become_user: postgres
+      register: cur_sb
+      changed_when: false
+      failed_when: false
+
+    - name: Restart Patroni (applies DCS, restarts Postgres)
+      systemd:
+        name: patroni
+        state: restarted
+      when:
+        - cur_sb.stdout != '2GB'
+        - cur_sb.rc == 0
+      timeout: 240
+
+    - name: Wait for Patroni REST health
+      command: curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8008/health
+      register: patroni_health
+      until: patroni_health.stdout == "200"
+      retries: 60
+      delay: 5
+      changed_when: false
+
+    - name: Wait until replica applied shared_buffers
+      command: psql -Atqc "SHOW shared_buffers;"
+      become_user: postgres
+      register: replica_sb
+      until: replica_sb.stdout == '2GB'
+      retries: 18
+      delay: 5
+
+    - name: Show replica-group settings
+      debug:
+        msg: "{{ inventory_hostname }} shared_buffers={{ replica_sb.stdout }}"
+
+- name: Rolling Patroni restart on primaries
+  hosts: db_primary:db2_primary
+  become: yes
+  serial: 1
+  tags: [patroni]
+  tasks:
+    - name: Set postgresql.use_unix_socket
+      lineinfile:
+        path: /etc/patroni/patroni.yml
+        regexp: '^  use_unix_socket:'
+        insertafter: '^  data_dir:'
+        line: '  use_unix_socket: true'
+
+    - name: Read live shared_buffers
+      command: psql -Atqc "SHOW shared_buffers;"
+      become_user: postgres
+      register: cur_sb
+      changed_when: false
+      failed_when: false
+
+    - name: Restart Patroni (applies DCS, restarts Postgres)
+      systemd:
+        name: patroni
+        state: restarted
+      when:
+        - cur_sb.stdout != '2GB'
+        - cur_sb.rc == 0
+      timeout: 240
+
+    # Restarting the old leader fails this node over. Wait until THIS
+    # node is healthy as primary or replica, not for /primary on this host.
+    - name: Wait for Patroni REST health
+      command: curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8008/health
+      register: patroni_health
+      until: patroni_health.stdout == "200"
+      retries: 60
+      delay: 5
+      changed_when: false
+      when: cur_sb.rc == 0
+
+    - name: Confirm live shared_buffers
+      command: psql -Atqc "SHOW shared_buffers;"
+      become_user: postgres
+      register: live_sb
+      until: live_sb.stdout == '2GB'
+      retries: 18
+      delay: 5
+      when: cur_sb.rc == 0
+
+    - name: Confirm live shared_preload_libraries
+      command: psql -Atqc "SHOW shared_preload_libraries;"
+      become_user: postgres
+      register: live_preload
+      when: cur_sb.rc == 0
+
+    - name: Check if this node is writable
+      command: psql -Atqc "SELECT pg_is_in_recovery();"
+      become_user: postgres
+      register: in_recovery
+      failed_when: false
+
+    - name: Show live memory settings
+      debug:
+        msg: "{{ inventory_hostname }} shared_buffers={{ live_sb.stdout | default('n/a') }} shared_preload_libraries={{ live_preload.stdout | default('n/a') }} in_recovery={{ in_recovery.stdout | default('n/a') }}"
+
+- name: Reinit replica stuck without WAL
+  hosts: db_all:db2_all
+  become: yes
+  serial: 1
+  tags: [patroni]
+  tasks:
+    - name: List cluster JSON
+      command: /opt/patroni/bin/patronictl -c /etc/patroni/patroni.yml list -f json
+      become_user: postgres
+      register: plist
+
+    - name: Reinit this member from the leader
+      command: >
+        /opt/patroni/bin/patronictl -c /etc/patroni/patroni.yml
+        reinit {{ patroni_cluster_name }} {{ inventory_hostname }} --force
+      become_user: postgres
+      timeout: 1800
+      when: >
+        (plist.stdout | from_json
+         | selectattr('Member', 'equalto', inventory_hostname)
+         | map(attribute='State') | list | first | default('')) == 'starting'
+
+    - name: Wait until this member is running or streaming
+      command: /opt/patroni/bin/patronictl -c /etc/patroni/patroni.yml list -f json
+      become_user: postgres
+      register: plist_wait
+      until: >
+        (plist_wait.stdout | from_json
+         | selectattr('Member', 'equalto', inventory_hostname)
+         | map(attribute='State') | list | first | default('')) in ['running', 'streaming']
+      retries: 90
+      delay: 10
+      when: >
+        (plist.stdout | from_json
+         | selectattr('Member', 'equalto', inventory_hostname)
+         | map(attribute='State') | list | first | default('')) == 'starting'
+
+- name: CREATE EXTENSION pg_stat_statements on current leaders
+  hosts: db_all:db2_all
+  become: yes
+  serial: 1
+  tags: [patroni]
+  tasks:
+    - name: Check if this node is writable
+      command: psql -Atqc "SELECT pg_is_in_recovery();"
+      become_user: postgres
+      register: in_recovery
+      failed_when: false
+
+    - name: List connectable databases
+      command: >
+        psql -Atqc "SELECT datname FROM pg_database
+        WHERE datistemplate = false AND datallowconn;"
+      become_user: postgres
+      register: db_names
+      when: in_recovery.stdout == 'f'
+
+    - name: CREATE EXTENSION pg_stat_statements on every database
+      command: >
+        psql -d {{ item }} -v ON_ERROR_STOP=1
+        -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
+      become_user: postgres
+      loop: "{{ db_names.stdout_lines | default([]) }}"
+      when:
+        - in_recovery.stdout == 'f'
+        - item | length > 0
+

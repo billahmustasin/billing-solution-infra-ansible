@@ -1,0 +1,112 @@
+# roles/patroni/templates/patroni.yml.j2
+scope: {{ patroni_cluster_name }}
+name: {{ inventory_hostname }}
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: {{ ansible_default_ipv4.address }}:8008
+
+etcd3:
+  hosts:
+{% for endpoint in etcd_endpoints.split(',') %}
+    - {{ endpoint.strip() | regex_replace('^http://', '') }}
+{% endfor %}
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        wal_level: replica
+        hot_standby: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+        max_connections: 500
+        shared_buffers: 2GB
+        effective_cache_size: 8GB
+        work_mem: 4MB
+        maintenance_work_mem: 512MB
+        wal_buffers: 16MB
+        random_page_cost: 1.1
+        effective_io_concurrency: 200
+        default_statistics_target: 100
+        max_wal_size: 4GB
+        min_wal_size: 1GB
+        checkpoint_completion_target: 0.9
+        shared_preload_libraries: pg_stat_statements
+        pg_stat_statements.max: 10000
+        pg_stat_statements.track: all
+        track_io_timing: "on"
+
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+
+  pg_hba:
+    - local all postgres peer
+    - local all all peer
+    - host all all 127.0.0.1/32 md5
+    - host all all ::1/128 md5
+    - local replication all peer
+    - host replication replicator 127.0.0.1/32 md5
+    - host replication replicator ::1/128 md5
+    - host replication replicator 172.17.0.0/16 md5
+    - host replication replicator 172.27.0.0/16 scram-sha-256
+    - host all all 172.17.0.0/16 md5
+    - host all all 172.27.0.0/16 scram-sha-256
+
+  users:
+    postgres:
+      password: {{ postgres_password }}
+    replicator:
+      password: {{ replication_password }}
+      options:
+        - replication
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: {{ ansible_default_ipv4.address }}:5432
+  bin_dir: /usr/pgsql-16/bin
+  data_dir: {{ pg_data_dir }}
+  pgpass: /tmp/pgpass
+  authentication:
+    replication:
+      username: replicator
+      password: {{ replication_password }}
+    superuser:
+      username: postgres
+      password: {{ postgres_password }}
+  parameters:
+    # 15Gi RAM / 4 vCPU shared with Patroni, PgBouncer, HAProxy, pgBackRest, etcd.
+    # 500 is the connection ceiling; work_mem stays 4MB so sorts cannot OOM the node.
+    # shared_buffers 2GB / effective_cache_size 8GB use idle RAM (was 256MB / 4GB).
+    # Live apply: patronictl edit-config for these keys, then rolling restart
+    # (replicas first, then primary). shared_preload_libraries needs that restart.
+    max_connections: 500
+    shared_buffers: 2GB
+    effective_cache_size: 8GB
+    work_mem: 4MB
+    maintenance_work_mem: 512MB
+    wal_buffers: 16MB
+    logging_collector: "on"
+    random_page_cost: 1.1
+    effective_io_concurrency: 200
+    default_statistics_target: 100
+    max_wal_size: 4GB
+    min_wal_size: 1GB
+    checkpoint_completion_target: 0.9
+    shared_preload_libraries: pg_stat_statements
+    pg_stat_statements.max: 10000
+    pg_stat_statements.track: all
+    track_io_timing: "on"
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false

@@ -1,0 +1,37 @@
+# roles/haproxy/templates/keepalived.conf.j2
+# Keepalived manages a floating VIP ({{ haproxy_vip }}) across HAProxy nodes.
+# The node with the highest priority holds the VIP. If it fails, the next
+# node takes over within ~3 seconds.
+
+global_defs {
+    router_id {{ inventory_hostname }}
+}
+
+vrrp_script chk_haproxy {
+    script "/bin/bash -c 'kill -0 \$(cat /run/haproxy/haproxy.pid 2>/dev/null) 2>/dev/null'"
+    interval 2
+    weight   -20
+    fall     2
+    rise     2
+    user root
+}
+
+vrrp_instance VI_1 {
+    state {% if inventory_hostname == haproxy_master_node %}MASTER{% else %}BACKUP{% endif %}
+
+    interface {{ ansible_default_ipv4.interface }}
+    virtual_router_id {{ haproxy_vrrp_id }}
+    priority {% if inventory_hostname == haproxy_master_node %}110{% else %}90{% endif %}
+
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass {{ haproxy_vrrp_password }}
+    }
+    virtual_ipaddress {
+        {{ haproxy_vip }}/{{ haproxy_vip_prefix }}
+    }
+    track_script {
+        chk_haproxy
+    }
+}

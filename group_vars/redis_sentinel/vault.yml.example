@@ -1,0 +1,4 @@
+# Copy to vault.yml and fill in real values:
+#   cp group_vars/redis_sentinel/vault.yml.example group_vars/redis_sentinel/vault.yml
+redis_require_password: "CHANGE_ME"
+redis_replication_password: "CHANGE_ME"

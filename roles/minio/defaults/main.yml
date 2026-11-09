@@ -1,0 +1,17 @@
+---
+minio_user: minio
+minio_group: minio
+minio_bin_dir: /usr/local/bin
+minio_config_dir: /etc/minio
+minio_data_dir: /var/lib/minio/data
+minio_log_dir: /var/log/minio
+
+minio_download_url: "https://dl.min.io/server/minio/release/linux-amd64/minio"
+minio_mc_download_url: "https://dl.min.io/client/mc/release/linux-amd64/mc"
+
+# S3 API and web console
+minio_api_port: 9000
+minio_console_port: 9001
+
+# Set minio_root_user / minio_root_password in group_vars/minio/vault.yml
+minio_root_user: minioadmin

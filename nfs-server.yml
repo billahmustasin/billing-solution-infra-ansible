@@ -1,0 +1,14 @@
+---
+# nfs-server.yml
+# Provisions NFS server for Loki / Grafana log volumes (Region A).
+# Export: /exports/logs — audit, app, access, loki
+
+- name: Provision NFS server — Region A
+  hosts: nfs_server
+  become: yes
+  gather_facts: yes
+  vars_files:
+    - group_vars/nfs_server.yml
+
+  roles:
+    - role: nfs-server

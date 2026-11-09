@@ -1,0 +1,8 @@
+# group_vars/etcd_cluster.yml
+# Production etcd members: db-a1a, db-a1b, etcd-witness (SuperApp-VM)
+
+# Peer URLs — inventory_hostname must match ETCD_NAME on each node.
+etcd_initial_cluster: "db-a1a=http://172.17.106.2:2380,db-a1b=http://172.17.106.3:2380,etcd-witness=http://172.17.106.6:2380"
+
+# "new" only on first bootstrap. After a successful cluster exists, set to "existing".
+etcd_initial_cluster_state: "existing"

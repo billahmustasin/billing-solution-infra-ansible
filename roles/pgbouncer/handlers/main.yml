@@ -1,0 +1,19 @@
+---
+- name: Reload PgBouncer
+  # SIGHUP reloads ini/userlist without dropping existing client or server connections.
+  # Used instead of systemctl reload so this works even if the unit has no ExecReload.
+  shell: |
+    set -e
+    pid=$(cat /var/run/pgbouncer/pgbouncer.pid 2>/dev/null || true)
+    if [ -z "${pid}" ] || [ "${pid}" = "0" ]; then
+      pid=$(systemctl show -p MainPID --value pgbouncer)
+    fi
+    test -n "${pid}" && test "${pid}" != "0"
+    kill -HUP "${pid}"
+  args:
+    executable: /bin/bash
+
+- name: Restart PgBouncer
+  service:
+    name: pgbouncer
+    state: restarted

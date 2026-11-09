@@ -1,0 +1,57 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Compares max offsets on Primary vs DR for each user topic.
+# Logs WARNING when lag exceeds {{ mm2_lag_alert_messages }} messages.
+
+set -euo pipefail
+
+PRIMARY="{{ mm2_primary_bootstrap }}"
+DR="{{ mm2_dr_bootstrap }}"
+KAFKA="{{ kafka_install_dir }}"
+THRESHOLD={{ mm2_lag_alert_messages }}
+LOG="{{ mm2_lag_log_file }}"
+TS="$(date -Is)"
+
+sum_offsets() {
+  local bootstrap="$1" topic="$2"
+  "${KAFKA}/bin/kafka-get-offsets.sh" \
+    --bootstrap-server "${bootstrap}" \
+    --topic "${topic}" 2>/dev/null \
+    | awk -F: '{s+=$3} END {print s+0}'
+}
+
+topics="$("${KAFKA}/bin/kafka-topics.sh" --bootstrap-server "${PRIMARY}" --list 2>/dev/null \
+  | grep -vE '^(mm2-|__|\.|heartbeats\.|checkpoints\.|offset-syncs\.)' || true)"
+
+if [[ -z "${topics}" ]]; then
+  echo "${TS} INFO no user topics on primary yet" >> "${LOG}"
+  exit 0
+fi
+
+max_lag=0
+worst_topic=""
+
+while IFS= read -r topic; do
+  [[ -z "${topic}" ]] && continue
+  primary_off="$(sum_offsets "${PRIMARY}" "${topic}")"
+  dr_off="$(sum_offsets "${DR}" "${topic}")"
+  lag=$(( primary_off - dr_off ))
+  if (( lag < 0 )); then
+    lag=$(( -lag ))
+  fi
+  if (( lag > max_lag )); then
+    max_lag="${lag}"
+    worst_topic="${topic}"
+  fi
+  if (( lag > THRESHOLD )); then
+    echo "${TS} WARNING topic=${topic} primary_offset=${primary_off} dr_offset=${dr_off} lag=${lag}" >> "${LOG}"
+  fi
+done <<< "${topics}"
+
+echo "${TS} INFO max_lag=${max_lag} worst_topic=${worst_topic:-none} threshold=${THRESHOLD}" >> "${LOG}"
+
+if (( max_lag > THRESHOLD )); then
+  exit 1
+fi
+
+exit 0

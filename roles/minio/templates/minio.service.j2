@@ -1,0 +1,19 @@
+[Unit]
+Description=MinIO Object Storage
+Documentation=https://min.io/docs/minio/linux/index.html
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ minio_user }}
+Group={{ minio_group }}
+EnvironmentFile={{ minio_config_dir }}/minio.env
+ExecStart={{ minio_bin_dir }}/minio server $MINIO_OPTS $MINIO_VOLUMES
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+WorkingDirectory={{ minio_data_dir }}
+
+[Install]
+WantedBy=multi-user.target

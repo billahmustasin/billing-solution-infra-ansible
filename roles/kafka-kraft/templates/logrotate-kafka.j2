@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+# Kafka broker, MirrorMaker 2, and MM2 lag-check logs
+{{ kafka_log4j_dir }}/*.log {{ kafka_log4j_dir }}/*.log.* {
+    {{ kafka_logrotate_frequency }}
+    rotate {{ kafka_logrotate_rotate }}
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    maxsize {{ kafka_logrotate_maxsize }}
+}

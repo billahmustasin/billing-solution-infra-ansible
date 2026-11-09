@@ -1,0 +1,30 @@
+---
+jenkins_version: "2.555.3"
+jenkins_rpm_release: "1"
+jenkins_package: "jenkins-{{ jenkins_version }}-{{ jenkins_rpm_release }}"
+
+jenkins_repo_url: "https://pkg.jenkins.io/rpm-stable/jenkins.repo"
+jenkins_gpg_key_url: "https://pkg.jenkins.io/rpm-stable/jenkins.io-2026.key"
+
+# Jenkins binds localhost only — nginx terminates TLS on 443
+jenkins_http_port: 8080
+jenkins_listen_address: "127.0.0.1"
+jenkins_https_port: 443
+jenkins_agent_port: 50000
+jenkins_home: /var/lib/jenkins
+
+# Set in group_vars/jenkins.yml for production NAT IP; falls back to private IP
+jenkins_public_ip: ""
+jenkins_public_url: >-
+  {{ ('https://' + jenkins_public_ip + '/') if (jenkins_public_ip | length > 0)
+     else ('https://' + ansible_default_ipv4.address + '/') }}
+jenkins_ssl_cn: "{{ jenkins_public_ip if (jenkins_public_ip | length > 0) else ansible_default_ipv4.address }}"
+jenkins_ssl_san_ips: "{{ ([ansible_default_ipv4.address] + ([jenkins_public_ip] if (jenkins_public_ip | length > 0) else [])) | unique | list }}"
+
+jenkins_ssl_dir: /etc/nginx/ssl/jenkins
+jenkins_ssl_cert: "{{ jenkins_ssl_dir }}/jenkins.crt"
+jenkins_ssl_key: "{{ jenkins_ssl_dir }}/jenkins.key"
+jenkins_ssl_days: 3650
+
+# RHEL 10+ ships OpenJDK 21; RHEL 8/9 use OpenJDK 17
+jenkins_java_package: "{{ 'java-21-openjdk-headless' if ansible_distribution_major_version | int >= 10 else 'java-17-openjdk-headless' }}"

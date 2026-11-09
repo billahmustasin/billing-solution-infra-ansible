@@ -1,0 +1,76 @@
+# postgres-managed.yml
+# Provisions both PostgreSQL HA clusters.
+#
+# Cluster 1 — db1 (172.31.92.167) Primary + db2 (172.31.29.76) Standby
+# Cluster 2 — db3 (172.31.95.27)  Primary + db4 (172.31.91.117) Standby
+# Shared etcd — db1 + db2 + etcd-witness (172.31.18.207)
+#   Cluster 2 reuses this etcd cluster; no new etcd nodes needed.
+---
+
+# ════════════════════════════════════════════════════════════════
+# SHARED ETCD — bootstrap once, used as DCS by both clusters
+# ════════════════════════════════════════════════════════════════
+
+- name: Bootstrap etcd cluster (db1 + db2 + etcd-witness)
+  hosts: etcd_cluster
+  become: yes
+  roles:
+    - etcd
+
+# ════════════════════════════════════════════════════════════════
+# CLUSTER 1  (db1 / db2)
+# ════════════════════════════════════════════════════════════════
+
+- name: "[C1] Install PostgreSQL"
+  hosts: db_all
+  become: yes
+  roles:
+    - postgres
+
+- name: "[C1] Install and configure Patroni"
+  hosts: db_all
+  become: yes
+  roles:
+    - patroni
+
+- name: "[C1] Install pgBackRest"
+  hosts: db_all
+  become: yes
+  roles:
+    - pgbackrest
+
+- name: "[C1] Install HAProxy and Keepalived"
+  hosts: db_all
+  become: yes
+  roles:
+    - haproxy
+
+# ════════════════════════════════════════════════════════════════
+# CLUSTER 2  (db3 / db4)
+# Connects to the existing etcd cluster — no etcd role here.
+# Patroni scope "myrace-pg-cluster-2" isolates its keys in etcd.
+# ════════════════════════════════════════════════════════════════
+
+- name: "[C2] Install PostgreSQL"
+  hosts: db2_all
+  become: yes
+  roles:
+    - postgres
+
+- name: "[C2] Install and configure Patroni"
+  hosts: db2_all
+  become: yes
+  roles:
+    - patroni
+
+- name: "[C2] Install pgBackRest"
+  hosts: db2_all
+  become: yes
+  roles:
+    - pgbackrest
+
+- name: "[C2] Install HAProxy and Keepalived"
+  hosts: db2_all
+  become: yes
+  roles:
+    - haproxy

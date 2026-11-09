@@ -1,0 +1,48 @@
+---
+# postgres-ops-user.yml
+# Developer/ops login race_ops_user on both cluster leaders.
+# No Postgres restart. Does not start PgBouncer.
+#
+#   ansible-playbook postgres-ops-user.yml
+
+- name: Create Cluster 1 ops role (leader only)
+  hosts: db_primary
+  become: yes
+  tasks:
+    - name: Render Cluster 1 ops SQL
+      template:
+        src: "{{ playbook_dir }}/scripts/sql/cluster1-ops-user.sql.j2"
+        dest: /tmp/cluster1-ops-user.sql
+        owner: postgres
+        group: postgres
+        mode: "0600"
+
+    - name: Apply Cluster 1 ops role
+      command: psql -v ON_ERROR_STOP=1 -f /tmp/cluster1-ops-user.sql
+      become_user: postgres
+      register: c1_ops
+
+    - name: Show Cluster 1 ops role
+      debug:
+        msg: "{{ c1_ops.stdout_lines[-8:] }}"
+
+- name: Create Cluster 2 ops role (leader only)
+  hosts: db2_primary
+  become: yes
+  tasks:
+    - name: Render Cluster 2 ops SQL
+      template:
+        src: "{{ playbook_dir }}/scripts/sql/cluster2-ops-user.sql.j2"
+        dest: /tmp/cluster2-ops-user.sql
+        owner: postgres
+        group: postgres
+        mode: "0600"
+
+    - name: Apply Cluster 2 ops role
+      command: psql -v ON_ERROR_STOP=1 -f /tmp/cluster2-ops-user.sql
+      become_user: postgres
+      register: c2_ops
+
+    - name: Show Cluster 2 ops role
+      debug:
+        msg: "{{ c2_ops.stdout_lines[-8:] }}"

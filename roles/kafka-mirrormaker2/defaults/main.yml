@@ -1,0 +1,34 @@
+---
+# Reuses Kafka binaries installed by kafka-kraft role on the same host.
+kafka_install_dir: /opt/kafka
+kafka_config_dir: /etc/kafka
+kafka_log4j_dir: /var/log/kafka
+kafka_user: kafka
+kafka_group: kafka
+
+mm2_config_file: "{{ kafka_config_dir }}/mm2.properties"
+mm2_heap_opts: "-Xms512m -Xmx512m"
+
+mm2_cluster_primary_alias: primary
+mm2_cluster_dr_alias: dr
+
+# Override in group_vars/kafka_mirrormaker2.yml
+mm2_primary_bootstrap: "172.17.105.9:9092,172.17.105.10:9092"
+mm2_dr_bootstrap: "172.27.105.9:9092,172.27.105.10:9092"
+
+mm2_topics_pattern: ".*"
+mm2_replication_factor: 2
+mm2_tasks_max: 4
+mm2_refresh_topics_interval_seconds: 30
+mm2_refresh_groups_interval_seconds: 30
+
+# Alert when summed partition offset lag exceeds this count (tune for your throughput).
+mm2_lag_alert_messages: 10000
+mm2_lag_check_cron_minute: "*/2"
+
+mm2_lag_check_script: /usr/local/bin/check-mm2-lag.sh
+mm2_lag_log_file: "{{ kafka_log4j_dir }}/mm2-lag-check.log"
+
+kafka_logrotate_frequency: daily
+kafka_logrotate_rotate: 14
+kafka_logrotate_maxsize: 100M

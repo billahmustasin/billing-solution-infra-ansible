@@ -1,0 +1,23 @@
+# test.yml
+---
+- name: Test provisioning
+  hosts: servers
+  become: yes
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install basic packages
+      apt:
+        name:
+          - curl
+          - wget
+          - vim
+          - net-tools
+        state: present
+
+    - name: Print server info
+      debug:
+        msg: "Connected to {{ ansible_hostname }} — {{ ansible_default_ipv4.address }}"

@@ -1,0 +1,69 @@
+---
+# postgres-monitoring.yml
+# Region A DB metrics: postgres_exporter, node_exporter,
+# HAProxy Prometheus bind, Patroni /metrics scrape (already on :8008).
+# No Postgres restart. HAProxy reload only. PgBouncer is not used.
+#
+#   ansible-playbook postgres-monitoring.yml
+
+- name: Create metrics_exporter on Cluster 1 leader
+  hosts: db_primary
+  become: yes
+  tasks:
+    - name: Render C1 metrics SQL
+      template:
+        src: "{{ playbook_dir }}/scripts/sql/cluster1-metrics-exporter.sql.j2"
+        dest: /tmp/cluster1-metrics-exporter.sql
+        owner: postgres
+        group: postgres
+        mode: "0600"
+    - name: Apply C1 metrics role
+      command: psql -v ON_ERROR_STOP=1 -f /tmp/cluster1-metrics-exporter.sql
+      become_user: postgres
+
+- name: Create metrics_exporter on Cluster 2 leader
+  hosts: db2_primary
+  become: yes
+  tasks:
+    - name: Render C2 metrics SQL
+      template:
+        src: "{{ playbook_dir }}/scripts/sql/cluster2-metrics-exporter.sql.j2"
+        dest: /tmp/cluster2-metrics-exporter.sql
+        owner: postgres
+        group: postgres
+        mode: "0600"
+    - name: Apply C2 metrics role
+      command: psql -v ON_ERROR_STOP=1 -f /tmp/cluster2-metrics-exporter.sql
+      become_user: postgres
+
+- name: HAProxy Prometheus bind
+  hosts: db_all:db2_all
+  become: yes
+  tasks:
+    - name: SELinux allow HAProxy Prometheus port
+      command: semanage port -a -t haproxy_port_t -p tcp 8404
+      changed_when: false
+      failed_when: false
+
+    - name: HAProxy Prometheus exporter frontend
+      blockinfile:
+        path: /etc/haproxy/haproxy.cfg
+        marker: "# {mark} ANSIBLE PROMETHEUS EXPORTER"
+        insertafter: EOF
+        block: |
+          frontend prometheus_exporter
+              bind *:8404
+              mode http
+              http-request use-service prometheus-exporter if { path /metrics }
+              no log
+
+    - name: Reload HAProxy
+      service:
+        name: haproxy
+        state: reloaded
+
+- name: Install Prometheus exporters
+  hosts: db_all:db2_all
+  become: yes
+  roles:
+    - db-exporters

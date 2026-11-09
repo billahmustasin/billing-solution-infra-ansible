@@ -1,0 +1,106 @@
+# SuperApp-VM — Production (from my_race-crendetials.xlsx)
+# Control node: Jenkins 172.17.105.16 (devopsadmin) — SSH key auth to all targets
+#
+# One-time on Jenkins (password required once per host):
+#   ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_ansible -N "" -C "ansible@jenkins-prod"
+#   for ip in 172.17.106.{2,3,4,5,6} 172.17.105.{7,8,9,10,11,12,13,16,17} 172.17.106.{7,8}; do
+#     ssh-copy-id -i ~/.ssh/id_ed25519_ansible.pub -p 65297 root@$ip
+#   done
+#
+#   ansible all -m ping
+#   ansible-playbook redis-sentinel.yml
+#   ansible-playbook kafka-kraft.yml
+#   ansible-playbook kafka-mirrormaker2.yml
+
+# ── DB Cluster 1 (Patroni + PostgreSQL) ─────────────────────────────────────
+[db_primary]
+db-a1a ansible_host=172.17.106.2
+
+[db_standby]
+db-a1b ansible_host=172.17.106.3
+
+[db_all:children]
+db_primary
+db_standby
+
+# etcd witness — quorum for both DB clusters (also Redis Sentinel + Kafka KRaft controller witness)
+[etcd_witness]
+etcd-witness ansible_host=172.17.106.6 kafka_broker_id=3 kafka_role=controller
+
+[etcd_cluster:children]
+db_all
+etcd_witness
+
+[haproxy:children]
+db_all
+
+# ── DB Cluster 2 ───────────────────────────────────────────────────────────
+[db2_primary]
+db-a2a ansible_host=172.17.106.4
+
+[db2_standby]
+db-a2b ansible_host=172.17.106.5
+
+[db2_all:children]
+db2_primary
+db2_standby
+
+[haproxy2:children]
+db2_all
+
+# ── Redis Sentinel (master + slave + etcd witness) ─────────────────────────
+[redis_master]
+redis-a1 ansible_host=172.17.105.7 redis_role=master
+
+[redis_slave]
+redis-a2 ansible_host=172.17.105.8 redis_role=slave
+
+[redis_sentinel:children]
+redis_master
+redis_slave
+etcd_witness
+
+# ── Kafka KRaft (2 brokers + controller witness on etcd-witness) ─────────────
+[kafka_broker]
+kafka-a1 ansible_host=172.17.105.9 kafka_broker_id=1
+kafka-a2 ansible_host=172.17.105.10 kafka_broker_id=2
+
+[kafka_kraft:children]
+kafka_broker
+etcd_witness
+
+# MirrorMaker 2 — Option C cross-region replication (runs on primary kafka-a1)
+[kafka_mirrormaker]
+kafka-a1 ansible_host=172.17.105.9
+
+# ── Kubernetes (reference — provisioned separately) ────────────────────────
+[k8s_master]
+k8s-master-1 ansible_host=172.17.105.11
+
+[k8s_workers]
+k8s-worker-1 ansible_host=172.17.105.12
+k8s-worker-2 ansible_host=172.17.105.13
+
+[k8s:children]
+k8s_master
+k8s_workers
+
+# ── Storage ────────────────────────────────────────────────────────────────
+[minio]
+minio-a1 ansible_host=172.17.106.7
+
+[nfs_server]
+nfs-a1 ansible_host=172.17.106.8
+
+# ── CI/CD & Registry ───────────────────────────────────────────────────────
+#[jenkins]
+#jenkins-a1 ansible_host=172.17.105.16
+
+[harbor]
+harbor-a1 ansible_host=172.17.105.17
+
+[all:vars]
+ansible_user=root
+ansible_port=65297
+ansible_python_interpreter=/usr/bin/python3
+ansible_ssh_private_key_file=/home/devopsadmin/.ssh/id_ed25519_ansible

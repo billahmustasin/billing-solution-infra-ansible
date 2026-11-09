@@ -1,0 +1,72 @@
+---
+# postgres-max-connections.yml
+# Raise Postgres max_connections. Requires a rolling Patroni restart.
+# Replicas first (standby max_connections must be >= primary), then primaries.
+# Brief write blip on each primary restart (~seconds). No etcd/Patroni process restart.
+#
+# 15Gi RAM / 4 vCPU: 500 is the practical ceiling. 1000 can OOM if many sessions
+# use work_mem at once. PgBouncer default_pool_size is not changed.
+#
+#   ansible-playbook postgres-max-connections.yml
+
+- name: Put max_connections=500 into Patroni DCS
+  hosts: db_primary:db2_primary
+  become: yes
+  serial: 1
+  tasks:
+    - name: Apply postgresql.parameters.max_connections
+      command: >
+        /opt/patroni/bin/patronictl -c /etc/patroni/patroni.yml
+        edit-config --force -p max_connections=500
+      become_user: postgres
+
+- name: Keep local Patroni yaml in sync
+  hosts: db_all:db2_all
+  become: yes
+  tasks:
+    - name: Set max_connections in /etc/patroni/patroni.yml
+      lineinfile:
+        path: /etc/patroni/patroni.yml
+        regexp: '^(\s*)max_connections:'
+        line: '    max_connections: 500'
+
+- name: Restart replicas first
+  hosts: db_standby:db2_standby
+  become: yes
+  serial: 1
+  tasks:
+    - name: Restart replica PostgreSQL via Patroni
+      command: >
+        /opt/patroni/bin/patronictl -c /etc/patroni/patroni.yml
+        restart {{ patroni_cluster_name }} {{ inventory_hostname }}
+        --force --timeout 90
+      become_user: postgres
+
+    - name: Wait for replica to stream
+      command: /opt/patroni/bin/patronictl -c /etc/patroni/patroni.yml list
+      become_user: postgres
+      register: replica_list
+      until: "'streaming' in replica_list.stdout and 'running' in replica_list.stdout"
+      retries: 18
+      delay: 5
+
+- name: Restart primaries
+  hosts: db_primary:db2_primary
+  become: yes
+  serial: 1
+  tasks:
+    - name: Restart primary PostgreSQL via Patroni
+      command: >
+        /opt/patroni/bin/patronictl -c /etc/patroni/patroni.yml
+        restart {{ patroni_cluster_name }} {{ inventory_hostname }}
+        --force --timeout 90
+      become_user: postgres
+
+    - name: Confirm live max_connections
+      command: psql -Atqc "SHOW max_connections;"
+      become_user: postgres
+      register: live_max
+
+    - name: Show live max_connections
+      debug:
+        msg: "{{ inventory_hostname }} max_connections={{ live_max.stdout }}"

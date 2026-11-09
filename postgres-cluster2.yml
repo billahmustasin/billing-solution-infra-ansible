@@ -1,0 +1,38 @@
+# postgres-cluster2.yml
+# Provisions Cluster 2:
+#   db3  (172.31.95.27)  — Primary  — PostgreSQL 16 + Patroni + pgBackRest + HAProxy + Keepalived
+#   db4  (172.31.91.117) — Standby  — same stack (WAL replica of db3)
+#
+# etcd DCS: reuses the existing 3-node cluster (db1 + db2 + etcd-witness).
+# Patroni scope "myrace-pg-cluster-2" keeps Cluster 2 keys isolated in etcd.
+# No etcd role needed here.
+---
+
+# ── Step 1: Install PostgreSQL ────────────────────────────────────────────
+- name: Install PostgreSQL on Cluster 2 DB servers
+  hosts: db2_all
+  become: yes
+  roles:
+    - postgres
+
+# ── Step 2: Configure Patroni ────────────────────────────────────────────
+# db3 bootstraps as primary; db4 joins as standby and begins WAL streaming.
+- name: Install and configure Patroni (Cluster 2)
+  hosts: db2_all
+  become: yes
+  roles:
+    - patroni
+
+# ── Step 3: Backup agent ──────────────────────────────────────────────────
+- name: Install pgBackRest (Cluster 2)
+  hosts: db2_all
+  become: yes
+  roles:
+    - pgbackrest
+
+# ── Step 5: Load-balancer + VIP ───────────────────────────────────────────
+- name: Install HAProxy and Keepalived (Cluster 2)
+  hosts: db2_all
+  become: yes
+  roles:
+    - haproxy

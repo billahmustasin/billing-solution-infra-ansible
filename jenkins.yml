@@ -1,0 +1,14 @@
+---
+# jenkins.yml
+# Provisions Jenkins LTS 2.555.3 on RHEL 10
+# Jenkins on localhost:8080; nginx serves HTTPS on 443 (self-signed, IP-based)
+
+- name: Provision Jenkins LTS
+  hosts: jenkins
+  become: yes
+  gather_facts: yes
+  vars_files:
+    - group_vars/jenkins.yml
+
+  roles:
+    - role: jenkins
